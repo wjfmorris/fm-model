@@ -1,6 +1,6 @@
 # FM Model
 
-A Python backend for a data-driven Football Manager 26 recruitment tool. The backend is now structured as an installable `fm_model` package and is ready for a separate Streamlit UI layer.
+A data-driven Football Manager 26 recruitment tool with an installable `fm_model` backend and a Streamlit dashboard for save setup, season targets, goal-driver analysis and player recruitment.
 
 ## What the model does
 
@@ -13,13 +13,13 @@ The intended workflow is:
 5. upload an FMST26/player-search export to score players against role- and league-relative replacement levels;
 6. compare owned players with the market and recalculate the effect of possible recruitment decisions.
 
-The modelling code is intentionally independent from Streamlit. A future `streamlit_app.py` should call the package API rather than contain modelling logic itself.
+The modelling code remains independent from Streamlit. `streamlit_app.py` is a thin interface over the tested package API rather than a second copy of the modelling logic.
 
 ## Repository layout
 
 ```text
 fm-model/
-├── src/
+├── streamlit_app.py\n├── .streamlit/\n│   └── config.toml\n├── src/
 │   └── fm_model/
 │       ├── __init__.py
 │       ├── __main__.py
@@ -96,7 +96,18 @@ Backend plus the dependencies intended for the future Streamlit app:
 pip install -r requirements.txt
 ```
 
-## Verify the backend
+## Run the Streamlit app
+
+Install the app environment and launch from the repository root:
+
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+The dashboard includes a synthetic **Load example data** path, so every main screen can be tested before importing a real FM26 save. For real data, upload league-table history, team-performance history and an FMST26/player-search export in the sidebar.
+
+## Verify the project
 
 ```bash
 python -m unittest discover -s tests -v
@@ -227,4 +238,4 @@ These are predictive relationships from game data, not proof that changing one m
 
 ## Streamlit handoff
 
-The backend is ready for the UI layer. See `docs/streamlit-integration.md` for the exact recommended entry point, public imports, upload flow, state boundaries and error-handling contract.
+The Streamlit UI is implemented in `streamlit_app.py`. See `docs/streamlit-integration.md` for the UI/backend boundary, upload flow, state handling and deployment notes.
