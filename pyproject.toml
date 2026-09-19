@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fm-model"
+version = "0.1.0"
+description = "League targets, learned goal drivers and squad recruitment models for Football Manager"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26,<3", "pandas>=2.2,<3", "scipy>=1.11,<2", "scikit-learn>=1.4,<2"]
+
+[project.optional-dependencies]
+imports = ["openpyxl>=3.1", "lxml>=5"]
+dev = ["ruff>=0.9"]
+
+[project.scripts]
+fm-model = "fm_model.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+

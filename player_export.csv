@@ -1,0 +1,3 @@
+player_name,player_id,league,season,team_id,role_group,minutes,age,xg_p90,xa_p90,goals_p90,shots_p90,key_passes_p90,progressive_passes_p90,dribbles_p90,tackles_won_p90,interceptions_p90,headers_won_p90,pressures_p90,possession_won_p90,possession_lost_p90,market_value,asking_price,wage,contract_months,owned
+Example Striker,example-player-1,Example League,2024/25,example-a,ST,2800,24,0.62,0.10,0.48,3.9,1.2,3.5,1.8,0.3,0.2,1.0,6.0,0.5,1.2,15000000,18000000,50000,36,true
+Example Centre Back,example-player-2,Example League,2024/25,example-a,DC,3000,27,0.03,0.02,0.02,0.4,0.3,2.0,0.2,1.4,1.6,4.8,9.0,1.5,0.8,8000000,9000000,35000,24,true

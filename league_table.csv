@@ -1,0 +1,25 @@
+league,season,position,team_id,matches,goals_for,goals_against,points,points_adjustment
+Example League,2023/24,1,example-2023-1,38,84,26,62,0
+Example League,2023/24,2,example-2023-2,38,76,31,58,0
+Example League,2023/24,3,example-2023-3,38,70,35,54,0
+Example League,2023/24,4,example-2023-4,38,64,40,50,0
+Example League,2023/24,5,example-2023-5,38,58,44,46,0
+Example League,2023/24,6,example-2023-6,38,52,48,42,0
+Example League,2023/24,7,example-2023-7,38,48,52,38,0
+Example League,2023/24,8,example-2023-8,38,44,56,34,0
+Example League,2023/24,9,example-2023-9,38,40,60,30,0
+Example League,2023/24,10,example-2023-10,38,36,64,26,0
+Example League,2023/24,11,example-2023-11,38,32,68,22,0
+Example League,2023/24,12,example-2023-12,38,28,108,18,0
+Example League,2024/25,1,example-2024-1,38,84,26,62,0
+Example League,2024/25,2,example-2024-2,38,77,31,58,0
+Example League,2024/25,3,example-2024-3,38,72,35,54,0
+Example League,2024/25,4,example-2024-4,38,64,40,50,0
+Example League,2024/25,5,example-2024-5,38,59,44,46,0
+Example League,2024/25,6,example-2024-6,38,54,48,42,0
+Example League,2024/25,7,example-2024-7,38,48,52,38,0
+Example League,2024/25,8,example-2024-8,38,45,56,34,0
+Example League,2024/25,9,example-2024-9,38,42,60,30,0
+Example League,2024/25,10,example-2024-10,38,36,64,26,0
+Example League,2024/25,11,example-2024-11,38,33,68,22,0
+Example League,2024/25,12,example-2024-12,38,30,120,18,0
