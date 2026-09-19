@@ -1,0 +1,39 @@
+name: backend-ci
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[imports]"
+
+      - name: Compile package
+        run: python -m compileall -q src/fm_model
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Smoke-test public API and CLI
+        run: |
+          python -c "import fm_model; from fm_model import MoneyballModel, read_player_export, read_table; print(fm_model.__version__)"
+          python -m fm_model --help
