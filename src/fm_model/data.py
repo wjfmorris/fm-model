@@ -107,7 +107,7 @@ def parse_number(value, *, decimal=".", ranges="error") -> float:
         return float("nan")
     s = re.sub(r"[£€$]", "", s)
     s = re.sub(r"(?i)(p/w|/wk|/week|perweek)$", "", s)
-    parts = re.split(r"[–—]|(?<=\d)-(?=[\d£€$])", s)
+    parts = re.split(r"[–—]|(?<=[0-9kKmMbB%])-(?=[+\\-]?[0-9.])", s, maxsplit=1)
     if len(parts) == 2:
         if ranges == "error":
             raise DataError(f"Range {value!r}: choose lower/upper/midpoint explicitly or retain separate bounds.")
