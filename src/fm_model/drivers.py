@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
-from .data import numeric, parse_number, require
+from .data import numeric, parse_number, require, season_number
 from .errors import DataError, NotFittedError
 from .learning import LearnedRegressor
 
@@ -104,6 +104,12 @@ class GoalDriverModel:
             include_all_available=False):
         require(frame, ["league", "season", "matches", "goals_for", "goals_against"])
         f = frame.copy()
+        # Team metric exports commonly use labels such as 2024/25 and formatted
+        # display numbers. Canonicalise those fields here instead of requiring a
+        # Streamlit caller to pre-clean them.
+        f["season"] = f["season"].map(season_number)
+        for col in ("matches", "goals_for", "goals_against"):
+            f[col] = f[col].map(lambda value: parse_number(value, ranges="error"))
         # validate_league_table checks season/league consistency when team identifiers exist;
         # for driver tables we permit repeated or partial observations but retain canonical checks.
         numeric(f, ["matches", "goals_for", "goals_against"])

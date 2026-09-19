@@ -1,10 +1,10 @@
-# Streamlit integration contract
+# Streamlit app architecture
 
-The modelling backend is intentionally independent from Streamlit. The eventual app should be a thin interface over the public API in `fm_model`, rather than duplicating modelling logic inside the UI.
+The modelling backend is intentionally independent from Streamlit. The implemented `streamlit_app.py` is a thin interface over the public API in `fm_model`, rather than duplicating modelling logic inside the UI.
 
 ## Recommended entry point
 
-Create `streamlit_app.py` at the repository root. Streamlit Community Cloud can then use that file as the app entry point and install `requirements.txt`.
+`streamlit_app.py` is the repository-root entry point. Streamlit Community Cloud can use that file directly and install `requirements.txt`.
 
 The app should import from the public package:
 
@@ -78,4 +78,4 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-The repository is ready for the UI layer once `streamlit_app.py` is added; no backend files need to be moved or repackaged at that point.
+The UI and backend are both present. Future UI changes should preserve this boundary: model logic belongs in `src/fm_model/`, while display and interaction logic belongs in `streamlit_app.py`.
