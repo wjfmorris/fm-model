@@ -11,6 +11,8 @@ from .drivers import GoalDriverModel
 from .errors import NotFittedError
 from .league import LeagueModel
 from .players import PlayerValuationModel
+from .outcomes import PlayerOutcomeModel
+from .planning import SquadPlanner
 
 
 class MoneyballModel:
@@ -26,6 +28,7 @@ class MoneyballModel:
         self.league_model = None
         self.driver_model = None
         self.player_model = None
+        self.player_outcome_model = None
 
     def fit_league(self, league_table: pd.DataFrame):
         self.league_model = LeagueModel(seed=self.seed).fit(league_table)
@@ -38,6 +41,10 @@ class MoneyballModel:
             include_all_available=include_all_available)
         return self
 
+    def fit_player_outcomes(self, historical_player_data: pd.DataFrame):
+        self.player_outcome_model = PlayerOutcomeModel(seed=self.seed).fit(historical_player_data)
+        return self
+
     def fit_players(self, player_data: pd.DataFrame, *, player_metric_map=None, role_column="role_group"):
         self.player_model = PlayerValuationModel(self.driver_model, seed=self.seed).fit(
             player_data, player_metric_map=player_metric_map, role_column=role_column)
@@ -48,7 +55,13 @@ class MoneyballModel:
             "league_targets": self.league_model is not None,
             "goal_drivers": self.driver_model is not None,
             "player_values": self.player_model is not None,
+            "attribute_outcomes": bool(
+                self.player_outcome_model is not None and getattr(self.player_outcome_model, "available", False)
+            ),
             "market_decisions": self.player_model is not None,
+            "squad_plan": (
+                self.league_model is not None and self.driver_model is not None and self.player_model is not None
+            ),
             "next_step": ("Upload completed league tables" if self.league_model is None else
                            "Upload team metrics" if self.driver_model is None else
                            "Upload player export" if self.player_model is None else "Run a target scenario"),
@@ -87,11 +100,46 @@ class MoneyballModel:
         return self.player_model.decisions(players, owned_column=owned_column,
                                            expected_minutes=expected_minutes, matches=matches)
 
+    def squad_plan(self, league, position, players: pd.DataFrame, *, club, probability=0.70,
+                   formation="4-2-3-1", max_recruits=3, matches=None, n_teams=None,
+                   next_season=None):
+        planner = SquadPlanner(
+            self.league_model,
+            self.driver_model,
+            self.player_model,
+            self.player_outcome_model,
+        )
+        return planner.plan(
+            league,
+            position,
+            players,
+            club=club,
+            probability=probability,
+            formation=formation,
+            max_recruits=max_recruits,
+            matches=matches,
+            n_teams=n_teams,
+            next_season=next_season,
+        )
+
+    def available_planning_clubs(self, league=None):
+        if self.driver_model is None:
+            return []
+        return SquadPlanner(
+            self.league_model,
+            self.driver_model,
+            self.player_model,
+            self.player_outcome_model,
+        ).available_clubs(league)
+
     def to_dict(self):
         return {"seed": self.seed,
                 "league_model": None if self.league_model is None else self.league_model.to_dict(),
                 "driver_model": None if self.driver_model is None else self.driver_model.to_dict(),
-                "player_model": None if self.player_model is None else self.player_model.to_dict()}
+                "player_model": None if self.player_model is None else self.player_model.to_dict(),
+                "player_outcome_model": (
+                    None if self.player_outcome_model is None else self.player_outcome_model.to_dict()
+                )}
 
     def save(self, path):
         destination = Path(path)
@@ -108,6 +156,8 @@ class MoneyballModel:
             obj.driver_model = GoalDriverModel.from_dict(state["driver_model"])
         if state.get("player_model") is not None:
             obj.player_model = PlayerValuationModel.from_dict(state["player_model"])
+        if state.get("player_outcome_model") is not None:
+            obj.player_outcome_model = PlayerOutcomeModel.from_dict(state["player_outcome_model"])
         return obj
 
     @classmethod
