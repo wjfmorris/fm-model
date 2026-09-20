@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -45,6 +46,35 @@ def clone_upload(source):
         clone.name = getattr(source, "name", "upload.csv")
         return clone
     return source
+
+
+def infer_season_from_name(name):
+    """Infer a season start year from names such as players_2025_26.csv."""
+
+    text = str(name or "")
+    match = re.search(r"(?<!\\d)(20\\d{2})(?:[/_-](?:20)?\\d{2})(?!\\d)", text)
+    return int(match.group(1)) if match else None
+
+
+def merge_table_uploads(sources):
+    """Merge table uploads, inferring a missing season from each filename."""
+
+    if not sources:
+        return None
+    sources = list(sources) if isinstance(sources, (list, tuple)) else [sources]
+    frames = []
+    for source in sources:
+        frame = read_table(clone_upload(source))
+        if "season" not in frame:
+            season = infer_season_from_name(getattr(source, "name", ""))
+            if season is None:
+                raise DataError(
+                    f"{getattr(source, 'name', 'upload')}: no season column. "
+                    "Add one or rename the file like team_2025_26.csv."
+                )
+            frame["season"] = season
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True, sort=False)
 
 
 def read_player_for_app(
@@ -97,10 +127,34 @@ def read_player_for_app(
     return frame
 
 
-def build_model(*, league_data=None, team_data=None, player_data=None, include_all_available=False):
+def read_player_history_for_app(sources, *, league=None, range_policy="error"):
+    """Merge historical player-season exports and preserve season labels."""
+
+    if not sources:
+        return None
+    sources = list(sources) if isinstance(sources, (list, tuple)) else [sources]
+    frames = []
+    for source in sources:
+        frame = read_table(clone_upload(source))
+        season = None
+        if "season" not in frame:
+            season = infer_season_from_name(getattr(source, "name", ""))
+            if season is None:
+                raise DataError(
+                    f"{getattr(source, 'name', 'player history')}: no season column. "
+                    "Add season or rename the file like players_2025_26.csv."
+                )
+        frame = prepare_player_export(frame, league=league, season=season)
+        for col in PLAYER_NUMERIC_COLUMNS.intersection(frame.columns):
+            frame[col] = frame[col].map(lambda value: parse_number(value, ranges=range_policy))
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True, sort=False)
+
+
+def build_model(*, league_data=None, team_data=None, historical_player_data=None, player_data=None, include_all_available=False):
     """Fit every supplied model layer in dependency order."""
 
-    if league_data is None and team_data is None and player_data is None:
+    if league_data is None and team_data is None and historical_player_data is None and player_data is None:
         raise DataError("Provide at least one data source before building the model.")
 
     model = MoneyballModel()
@@ -108,6 +162,8 @@ def build_model(*, league_data=None, team_data=None, player_data=None, include_a
         model.fit_league(league_data)
     if team_data is not None:
         model.fit_drivers(team_data, include_all_available=include_all_available)
+    if historical_player_data is not None:
+        model.fit_player_outcomes(historical_player_data)
     if player_data is not None:
         model.fit_players(player_data)
     return model
@@ -124,6 +180,7 @@ def load_example_frames():
     return {
         "league": read_table(root / "league_table.csv"),
         "team": read_table(root / "team_metrics.csv"),
+        "player_history": read_table(root / "player_history.csv"),
         "players": read_table(root / "player_export.csv"),
     }
 
