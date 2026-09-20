@@ -1303,6 +1303,14 @@ def render_squad_plan():
                     )
 
     st.subheader("5. Recommended transfer scenario")
+    selection_reason = after.get("selection_reason")
+    if selection_reason:
+        st.write(selection_reason)
+        st.caption(
+            f"Transfer packages evaluated: {int(after.get('packages_considered', 0)):,} · "
+            f"Requested threshold reached: {'yes' if after.get('target_reached') else 'no'}."
+        )
+
     transfers = pd.DataFrame(result.get("recommended_transfers", []))
     if transfers.empty:
         st.info("No transfer was required or no candidate had measurable positive impact under the available evidence.")
