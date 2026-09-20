@@ -52,7 +52,7 @@ def infer_season_from_name(name):
     """Infer a season start year from names such as players_2025_26.csv."""
 
     text = str(name or "")
-    match = re.search(r"(?<!\\d)(20\\d{2})(?:[/_-](?:20)?\\d{2})(?!\\d)", text)
+    match = re.search(r"(?<!\d)(20\d{2})(?:[/_-](?:20)?\d{2})(?!\d)", text)
     return int(match.group(1)) if match else None
 
 
