@@ -7,6 +7,7 @@ import pandas as pd
 from fm_model.app_support import build_model, load_example_frames
 from fm_model.collection import collection_plan
 from fm_model.data import ATTRIBUTES
+from fm_model.roles import canonical_role
 
 
 class SquadPlanningTests(unittest.TestCase):
@@ -27,6 +28,15 @@ class SquadPlanningTests(unittest.TestCase):
         self.assertIn("GK", plan["historical_players"]["positions"])
         self.assertIn("every club", plan["historical_players"]["clubs"].lower())
         self.assertIn("Current Ability (CA)", plan["exclude_from_performance_models"])
+
+    def test_native_fm_position_labels_map_to_planner_groups(self):
+        self.assertEqual(canonical_role("D (C)"), "CB")
+        self.assertEqual(canonical_role("D (R)"), "FB_WB")
+        self.assertEqual(canonical_role("WB (L)"), "FB_WB")
+        self.assertEqual(canonical_role("M (C)"), "CM_DM")
+        self.assertEqual(canonical_role("AM (R)"), "AM_W")
+        self.assertEqual(canonical_role("ST (C)"), "ST")
+        self.assertEqual(canonical_role("GK"), "GK")
 
     def test_attribute_outcome_model_uses_chronological_validation(self):
         outcomes = self.model.player_outcome_model
