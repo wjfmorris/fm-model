@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import math
+from itertools import combinations
 
 import numpy as np
 import pandas as pd
@@ -559,6 +559,126 @@ class SquadPlanner:
         outgoing_value = sum(x["outgoing_market_price"] or 0 for x in transfers)
         return prediction, transfers, float(incoming_cost - outgoing_value)
 
+    def _select_transfer_package(
+        self,
+        baseline,
+        scored,
+        opportunities,
+        *,
+        league,
+        target_position,
+        requested_probability,
+        context,
+        max_recruits,
+    ):
+        """Choose the cheapest recommendation subset that reaches the requested target.
+
+        The search is deliberately small and inspectable: there is at most one
+        value-selected recommendation per canonical position, so every subset up
+        to the maximum recruit count can be evaluated by the actual combined model.
+        """
+
+        if not opportunities:
+            forecast, transfers, net_spend = self._simulate_combined_plan(
+                baseline, scored, [], context["matches"]
+            )
+            evaluation = self.league_model.evaluate(
+                league,
+                forecast["goals_for"],
+                forecast["goals_against"],
+                target_position=int(target_position),
+                matches=context["matches"],
+                n_teams=context["n_teams"],
+                next_season=context["season"],
+            ).iloc[0]
+            probability = self._finite(evaluation.get("estimated_target_probability"))
+            return forecast, transfers, net_spend, {
+                "packages_considered": 1,
+                "target_reached": bool(
+                    probability is not None and probability >= requested_probability
+                ),
+                "selection_reason": "No measurable positive recruitment opportunity was available.",
+                "selected_probability": probability,
+            }
+
+        candidates = []
+        limit = min(int(max_recruits), len(opportunities))
+        for size in range(1, limit + 1):
+            for subset in combinations(opportunities, size):
+                forecast, transfers, net_spend = self._simulate_combined_plan(
+                    baseline, scored, list(subset), context["matches"]
+                )
+                if not transfers:
+                    continue
+                evaluation = self.league_model.evaluate(
+                    league,
+                    forecast["goals_for"],
+                    forecast["goals_against"],
+                    target_position=int(target_position),
+                    matches=context["matches"],
+                    n_teams=context["n_teams"],
+                    next_season=context["season"],
+                ).iloc[0]
+                probability = self._finite(evaluation.get("estimated_target_probability"))
+                candidates.append({
+                    "forecast": forecast,
+                    "transfers": transfers,
+                    "net_spend": float(net_spend),
+                    "probability": probability,
+                    "predicted_position": float(evaluation["predicted_position"]),
+                    "target_reached": bool(
+                        probability is not None and probability >= float(requested_probability)
+                    ),
+                })
+
+        if not candidates:
+            forecast, transfers, net_spend = self._simulate_combined_plan(
+                baseline, scored, [], context["matches"]
+            )
+            return forecast, transfers, net_spend, {
+                "packages_considered": 0,
+                "target_reached": False,
+                "selection_reason": "No valid transfer package could be simulated from the current export.",
+                "selected_probability": None,
+            }
+
+        feasible = [row for row in candidates if row["target_reached"]]
+        if feasible:
+            best = min(
+                feasible,
+                key=lambda row: (
+                    row["net_spend"],
+                    len(row["transfers"]),
+                    -(row["probability"] if row["probability"] is not None else -1),
+                ),
+            )
+            reason = (
+                "Lowest modelled net-spend package among the tested position recommendations "
+                "that reaches the requested target probability."
+            )
+        else:
+            best = min(
+                candidates,
+                key=lambda row: (
+                    -(row["probability"] if row["probability"] is not None else -1),
+                    row["predicted_position"],
+                    row["net_spend"],
+                    len(row["transfers"]),
+                ),
+            )
+            reason = (
+                "No tested package reaches the requested probability within the signing limit; "
+                "this package gives the strongest modelled progress, with net spend used as a tie-break."
+            )
+
+        return best["forecast"], best["transfers"], best["net_spend"], {
+            "packages_considered": len(candidates),
+            "target_reached": best["target_reached"],
+            "selection_reason": reason,
+            "selected_probability": best["probability"],
+        }
+
+
     def plan(
         self,
         league,
@@ -620,9 +740,15 @@ class SquadPlanner:
             key=lambda row: (row["impact_score"], row.get("planner_value_score", -np.inf)),
             reverse=True,
         )
-        selected_recommendations = opportunities[: int(max_recruits)]
-        after, transfer_plan, net_spend = self._simulate_combined_plan(
-            baseline, scored, selected_recommendations, context["matches"]
+        after, transfer_plan, net_spend, package_selection = self._select_transfer_package(
+            baseline,
+            scored,
+            opportunities,
+            league=league,
+            target_position=int(position),
+            requested_probability=float(probability),
+            context=context,
+            max_recruits=int(max_recruits),
         )
 
         current_eval = self.league_model.evaluate(
@@ -699,6 +825,9 @@ class SquadPlanner:
                 "predicted_position": float(after_eval["predicted_position"]),
                 "estimated_target_probability": self._finite(after_eval.get("estimated_target_probability")),
                 "net_spend": net_spend,
+                "target_reached": package_selection["target_reached"],
+                "packages_considered": package_selection["packages_considered"],
+                "selection_reason": package_selection["selection_reason"],
                 "interpretation": (
                     "Combined scenario after replacing mapped player per-90 inputs and re-running the goal-driver model."
                 ),
