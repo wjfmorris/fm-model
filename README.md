@@ -11,7 +11,7 @@ The primary workflow is:
 3. optionally collect historical player-season exports with **all available attributes and broad performance statistics**, so the last season can be held out while the model learns attribute → player-outcome relationships;
 4. upload the current squad plus the broadest realistic transfer market, including positions, minutes, statistics, attributes, prices, wages and contracts;
 5. choose your club, formation, target position and evidence threshold;
-6. forecast the current team's next-season GF/GA from its latest underlying team-process profile;
+6. forecast the current team's next-season GF/GA from its latest underlying team-process profile, adjusted from the previous XI to the current modelled XI when historical player seasons are available;
 7. calculate the attack/defence gap to the target;
 8. identify owned players whose market price looks high relative to contribution and replaceability;
 9. simulate player-for-player upgrades by position, using observed statistics plus historical attribute predictions where the evidence supports them;
@@ -84,7 +84,7 @@ Uses historical player-season rows to learn how attributes predict observable pl
 
 ### SquadPlanner
 
-Connects the model layers into one planning result. It selects a formation-aware current XI, forecasts the club from its latest team-process profile, calculates the GF/GA gap, evaluates sales, simulates market replacements by position, builds minimum stat/attribute profiles and candidate shortlists, and re-runs the team goal model after the proposed transfer package.
+Connects the model layers into one planning result. It selects a formation-aware current XI, adjusts the latest team-process profile from the previous XI to the current XI when historical player data allows, forecasts next-season GF/GA, calculates the goal gap, evaluates sales, simulates market replacements by position, builds minimum stat/attribute profiles and candidate shortlists, and re-runs the team goal model after the proposed transfer package.
 
 ### MoneyballModel
 
