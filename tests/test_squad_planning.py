@@ -55,6 +55,8 @@ class SquadPlanningTests(unittest.TestCase):
         self.assertIn("recommended_transfers", plan)
         self.assertIn("after_transfer_forecast", plan)
         self.assertEqual(plan["missing_formation_slots"], {})
+        self.assertIn("selection_reason", plan["after_transfer_forecast"])
+        self.assertGreaterEqual(plan["after_transfer_forecast"]["packages_considered"], 1)
         self.assertTrue(plan["model_evidence"]["attribute_outcomes"])
 
         target = plan["target"]["recommended"]
