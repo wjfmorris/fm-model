@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from itertools import combinations
+from itertools import combinations, product
 
 import numpy as np
 import pandas as pd
@@ -604,6 +604,33 @@ class SquadPlanner:
             ) if c in ranking_pool.columns
         ]
         shortlist = ranking_pool.head(8)[shortlist_columns].replace({np.nan: None}).to_dict("records")
+
+        # Keep a compact set of viable alternatives for the package optimiser.
+        # This means "cheapest route" can choose a cheaper second/third option in
+        # a position when that player is still sufficient to reach the target.
+        candidate_options = []
+        for _, option in ranking_pool.head(4).iterrows():
+            candidate_options.append({
+                "position": position,
+                "position_label": ROLE_LABELS.get(position, position),
+                "slots": int(slots),
+                "outgoing_row_id": int(option["outgoing_row_id"]),
+                "outgoing_player": str(option["outgoing_player"]),
+                "recommended_player_row_id": int(option["_row_id"]),
+                "recommended_player": str(option.get("player_name", "")),
+                "recommended_club": str(option.get("team_id", "")),
+                "market_price": self._finite(option.get("market_price")),
+                "expected_comparable_price": self._finite(
+                    option.get("expected_market_price_for_contribution")
+                ),
+                "estimated_value_edge": self._finite(option.get("estimated_value_edge")),
+                "gf_gain": float(option["gf_gain"]),
+                "ga_reduction": float(option["ga_reduction"]),
+                "impact_score": float(option["impact_score"]),
+                "planner_value_score": float(option.get("planner_value_score", np.nan)),
+                "mapped_features_used": int(option.get("mapped_features_used", 0)),
+            })
+
         return all_sim, [{
             "position": position,
             "position_label": ROLE_LABELS.get(position, position),
@@ -623,6 +650,7 @@ class SquadPlanner:
             "mapped_features_used": int(best.get("mapped_features_used", 0)),
             "minimum_profile": profile,
             "candidate_shortlist": shortlist,
+            "candidate_options": candidate_options,
         }]
 
     def _minimum_profile(self, scored, simulations, position, best, *, attack_gap, defence_gap):
@@ -856,32 +884,41 @@ class SquadPlanner:
         candidates = []
         limit = min(int(max_recruits), len(opportunities))
         for size in range(1, limit + 1):
-            for subset in combinations(opportunities, size):
-                forecast, transfers, net_spend = self._simulate_combined_plan(
-                    baseline, scored, list(subset), context["matches"], base_adjustment=base_adjustment
-                )
-                if not transfers:
-                    continue
-                evaluation = self.league_model.evaluate(
-                    league,
-                    forecast["goals_for"],
-                    forecast["goals_against"],
-                    target_position=int(target_position),
-                    matches=context["matches"],
-                    n_teams=context["n_teams"],
-                    next_season=context["season"],
-                ).iloc[0]
-                probability = self._finite(evaluation.get("estimated_target_probability"))
-                candidates.append({
-                    "forecast": forecast,
-                    "transfers": transfers,
-                    "net_spend": float(net_spend),
-                    "probability": probability,
-                    "predicted_position": float(evaluation["predicted_position"]),
-                    "target_reached": bool(
-                        probability is not None and probability >= float(requested_probability)
-                    ),
-                })
+            for position_subset in combinations(opportunities, size):
+                option_groups = [
+                    opportunity.get("candidate_options") or [opportunity]
+                    for opportunity in position_subset
+                ]
+                for chosen_players in product(*option_groups):
+                    forecast, transfers, net_spend = self._simulate_combined_plan(
+                        baseline,
+                        scored,
+                        list(chosen_players),
+                        context["matches"],
+                        base_adjustment=base_adjustment,
+                    )
+                    if not transfers:
+                        continue
+                    evaluation = self.league_model.evaluate(
+                        league,
+                        forecast["goals_for"],
+                        forecast["goals_against"],
+                        target_position=int(target_position),
+                        matches=context["matches"],
+                        n_teams=context["n_teams"],
+                        next_season=context["season"],
+                    ).iloc[0]
+                    probability = self._finite(evaluation.get("estimated_target_probability"))
+                    candidates.append({
+                        "forecast": forecast,
+                        "transfers": transfers,
+                        "net_spend": float(net_spend),
+                        "probability": probability,
+                        "predicted_position": float(evaluation["predicted_position"]),
+                        "target_reached": bool(
+                            probability is not None and probability >= float(requested_probability)
+                        ),
+                    })
 
         if not candidates:
             forecast, transfers, net_spend = self._simulate_combined_plan(
