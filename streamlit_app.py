@@ -1112,6 +1112,17 @@ def render_squad_plan():
         st.warning("No club identifiers are available in the team-performance history.")
         return
     preferred = st.session_state.get("owned_club_input", "")
+    if preferred not in clubs and players is not None and "owned" in players and "team_id" in players:
+        owned_values = players["owned"]
+        if pd.api.types.is_bool_dtype(owned_values):
+            owned_mask = owned_values.fillna(False)
+        else:
+            owned_mask = owned_values.astype(str).str.strip().str.lower().isin(
+                {"true", "1", "yes", "y", "owned", "ours", "current", "squad"}
+            )
+        owned_clubs = players.loc[owned_mask, "team_id"].dropna().astype(str).unique().tolist()
+        if len(owned_clubs) == 1 and owned_clubs[0] in clubs:
+            preferred = owned_clubs[0]
     club_index = clubs.index(preferred) if preferred in clubs else 0
 
     a, b, c1, d = st.columns(4)
