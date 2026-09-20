@@ -1281,6 +1281,27 @@ def render_squad_plan():
                         },
                     )
 
+                shortlist = pd.DataFrame(row.get("candidate_shortlist", []))
+                if not shortlist.empty:
+                    st.markdown("**Players in the current export who fit this upgrade route**")
+                    st.dataframe(
+                        shortlist,
+                        width="stretch",
+                        hide_index=True,
+                        column_config={
+                            "market_price": st.column_config.NumberColumn("Market price", format="%.0f"),
+                            "expected_market_price_for_contribution": st.column_config.NumberColumn(
+                                "Comparable price", format="%.0f"
+                            ),
+                            "estimated_value_edge": st.column_config.NumberColumn(
+                                "Estimated value edge", format="%.0f"
+                            ),
+                            "gf_gain": st.column_config.NumberColumn("GF change", format="%.2f"),
+                            "ga_reduction": st.column_config.NumberColumn("GA reduction", format="%.2f"),
+                            "impact_score": st.column_config.NumberColumn("Gap impact", format="%.2f"),
+                        },
+                    )
+
     st.subheader("5. Recommended transfer scenario")
     transfers = pd.DataFrame(result.get("recommended_transfers", []))
     if transfers.empty:
