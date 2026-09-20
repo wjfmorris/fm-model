@@ -54,7 +54,7 @@ performance evidence rather than being treated as zero-output players.
 With all core layers present, the app produces one connected result:
 
 - the GF/GA target for the requested finishing position;
-- a current next-season GF/GA forecast if the latest team-process profile repeats;
+- a current next-season GF/GA forecast starting from the latest team-process profile, adjusted from the previous XI to the current modelled XI when historical player seasons allow;
 - the attack and defence gap to the target;
 - owned-player sale candidates based on contribution, market price and replaceability;
 - the positions where available market replacements close the goal gap most effectively;
