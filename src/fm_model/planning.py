@@ -158,14 +158,18 @@ class SquadPlanner:
         return number if np.isfinite(number) else None
 
     def _metric_value(self, row, player_col, team_feature):
-        value = self._finite(row.get(player_col))
-        if value is not None:
-            return value
+        observed = self._finite(row.get(player_col))
         if team_feature in {"xg", "non_penalty_xg"}:
-            value = self._finite(row.get("predicted_chance_generation"))
-            if value is not None:
-                return value
-        return None
+            predicted = self._finite(row.get("predicted_chance_generation"))
+            if predicted is not None:
+                if observed is None:
+                    return predicted
+                minutes = self._finite(row.get("minutes")) or 0.0
+                # Attribute-predicted chance generation acts as a prior. Observed
+                # performance receives more weight as minutes accumulate.
+                observed_weight = minutes / (minutes + 900.0)
+                return observed_weight * observed + (1.0 - observed_weight) * predicted
+        return observed
 
     def _apply_replacement(self, baseline, outgoing, incoming):
         modified = baseline.copy()
@@ -235,8 +239,28 @@ class SquadPlanner:
         batch = pd.DataFrame(modified_rows).reset_index(drop=True)
         prediction = self.driver_model.predict(batch, matches=int(matches))
         result = candidates.reset_index(drop=True).copy()
-        result["projected_goals_for"] = prediction["predicted_goals_for"].to_numpy()
-        result["projected_goals_against"] = prediction["predicted_goals_against"].to_numpy()
+        projected_for = prediction["predicted_goals_for"].to_numpy(dtype=float)
+        projected_against = prediction["predicted_goals_against"].to_numpy(dtype=float)
+
+        # Historical attribute models add two same-unit corrections that team
+        # process statistics cannot capture directly: finishing above/below xG,
+        # and goalkeeper xG prevention. These remain predictions, not causal effects.
+        attr_for = np.zeros(len(result), dtype=float)
+        attr_against = np.zeros(len(result), dtype=float)
+        outgoing_finish = self._finite(outgoing.get("predicted_finishing")) or 0.0
+        outgoing_gk = self._finite(outgoing.get("predicted_goalkeeping")) or 0.0
+        for j, (_, candidate) in enumerate(result.iterrows()):
+            incoming_finish = self._finite(candidate.get("predicted_finishing"))
+            if incoming_finish is not None and candidate.get("canonical_position") != "GK":
+                attr_for[j] = (incoming_finish - outgoing_finish) * self.lineup_share * int(matches)
+            incoming_gk = self._finite(candidate.get("predicted_goalkeeping"))
+            if incoming_gk is not None and candidate.get("canonical_position") == "GK":
+                attr_against[j] = (incoming_gk - outgoing_gk) * self.lineup_share * int(matches)
+
+        result["attribute_finishing_adjustment"] = attr_for
+        result["attribute_goalkeeping_reduction"] = attr_against
+        result["projected_goals_for"] = np.maximum(projected_for + attr_for, 0.0)
+        result["projected_goals_against"] = np.maximum(projected_against - attr_against, 0.0)
         result["gf_gain"] = result["projected_goals_for"] - current_forecast["goals_for"]
         result["ga_reduction"] = current_forecast["goals_against"] - result["projected_goals_against"]
         result["outgoing_row_id"] = int(outgoing.get("_row_id", -1))
@@ -320,6 +344,15 @@ class SquadPlanner:
             attack_gap=attack_gap,
             defence_gap=defence_gap,
         )
+        shortlist_columns = [
+            c for c in (
+                "player_name", "team_id", "market_price", "expected_market_price_for_contribution",
+                "estimated_value_edge", "gf_gain", "ga_reduction", "impact_score",
+                "planner_value_score", "football_contribution_units", "above_role_replacement",
+                "decision_confidence", "mapped_features_used",
+            ) if c in ranking_pool.columns
+        ]
+        shortlist = ranking_pool.head(8)[shortlist_columns].replace({np.nan: None}).to_dict("records")
         return all_sim, [{
             "position": position,
             "position_label": ROLE_LABELS.get(position, position),
@@ -338,6 +371,7 @@ class SquadPlanner:
             "planner_value_score": float(best.get("planner_value_score", np.nan)),
             "mapped_features_used": int(best.get("mapped_features_used", 0)),
             "minimum_profile": profile,
+            "candidate_shortlist": shortlist,
         }]
 
     def _minimum_profile(self, scored, simulations, position, best, *, attack_gap, defence_gap):
@@ -492,6 +526,35 @@ class SquadPlanner:
             })
 
         prediction = self._forecast(modified, matches)
+
+        # Apply the same finishing/GK corrections used in individual replacement
+        # scenarios to the combined transfer package.
+        finishing_adjustment = 0.0
+        goalkeeping_reduction = 0.0
+        for transfer in transfers:
+            incoming_rows = scored[scored["_row_id"].eq(transfer["recommended_player_row_id"])]
+            outgoing_rows = scored[scored["_row_id"].eq(transfer["outgoing_row_id"])]
+            if incoming_rows.empty:
+                continue
+            incoming = incoming_rows.iloc[0]
+            outgoing = outgoing_rows.iloc[0] if not outgoing_rows.empty else self._placeholder(
+                scored, transfer["position"]
+            )
+            if transfer["position"] == "GK":
+                inc = self._finite(incoming.get("predicted_goalkeeping"))
+                out = self._finite(outgoing.get("predicted_goalkeeping")) or 0.0
+                if inc is not None:
+                    goalkeeping_reduction += (inc - out) * self.lineup_share * int(matches)
+            else:
+                inc = self._finite(incoming.get("predicted_finishing"))
+                out = self._finite(outgoing.get("predicted_finishing")) or 0.0
+                if inc is not None:
+                    finishing_adjustment += (inc - out) * self.lineup_share * int(matches)
+        prediction["goals_for"] = max(prediction["goals_for"] + finishing_adjustment, 0.0)
+        prediction["goals_against"] = max(prediction["goals_against"] - goalkeeping_reduction, 0.0)
+        prediction["attribute_finishing_adjustment"] = float(finishing_adjustment)
+        prediction["attribute_goalkeeping_reduction"] = float(goalkeeping_reduction)
+
         incoming_cost = sum(x["market_price"] or 0 for x in transfers)
         outgoing_value = sum(x["outgoing_market_price"] or 0 for x in transfers)
         return prediction, transfers, float(incoming_cost - outgoing_value)
