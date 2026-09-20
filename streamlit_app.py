@@ -1194,8 +1194,9 @@ def render_squad_plan():
     m4.metric("Current forecast GA", _fmt(current.get("goals_against"), 1))
 
     st.write(
-        f"If **{club}** repeats its latest underlying team-performance profile, the goal-driver model forecasts "
-        f"approximately **{_fmt(current['goals_for'], 1)} scored and {_fmt(current['goals_against'], 1)} conceded** next season, "
+        f"Starting from **{club}'s** latest underlying team-performance profile and adjusting it from the previous XI "
+        f"to the current modelled XI where historical player seasons allow, the model forecasts approximately "
+        f"**{_fmt(current['goals_for'], 1)} scored and {_fmt(current['goals_against'], 1)} conceded** next season, "
         f"a modelled finishing position of about **{_fmt(current['predicted_position'], 1)}**."
     )
     st.caption(current.get("evidence", ""))
