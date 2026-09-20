@@ -22,6 +22,12 @@ DATA_CATALOGUE = {
         "attributes": list(ATTRIBUTES),
         "notes": "Use every club and every position across multiple completed seasons. The final season is held out when enough history exists so attribute -> outcome relationships can be validated chronologically.",
     },
+    "historical_player_export": {
+        "recommended_identity": ["player_name", "player_id", "league", "season", "team_id", "role_group", "minutes", "age"],
+        "performance": list(PLAYER_METRICS),
+        "attributes": list(ATTRIBUTES),
+        "notes": "Collect every player from every club for several completed seasons. The latest historical season is held out when attribute-outcome models are validated.",
+    },
     "player_export": {
         "recommended_identity": ["player_name", "player_id", "league", "team_id", "role_group", "minutes", "age"],
         "performance": list(PLAYER_METRICS),
