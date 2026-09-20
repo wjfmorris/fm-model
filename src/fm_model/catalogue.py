@@ -16,11 +16,23 @@ DATA_CATALOGUE = {
         "defensive": list(DEFENCE_CANDIDATES),
         "notes": "Counts are converted to per-match rates. Keep xG, shots, chances, set pieces, pressing and goalkeeping fields where available.",
     },
+    "historical_player_export": {
+        "recommended_identity": ["player_name", "player_id", "league", "season", "team_id", "role_group", "minutes", "age"],
+        "performance": list(PLAYER_METRICS),
+        "attributes": list(ATTRIBUTES),
+        "notes": "Use every club and every position across multiple completed seasons. The final season is held out when enough history exists so attribute -> outcome relationships can be validated chronologically.",
+    },
+    "historical_player_export": {
+        "recommended_identity": ["player_name", "player_id", "league", "season", "team_id", "role_group", "minutes", "age"],
+        "performance": list(PLAYER_METRICS),
+        "attributes": list(ATTRIBUTES),
+        "notes": "Collect every player from every club for several completed seasons. The latest historical season is held out when attribute-outcome models are validated.",
+    },
     "player_export": {
         "recommended_identity": ["player_name", "player_id", "league", "team_id", "role_group", "minutes", "age"],
         "performance": list(PLAYER_METRICS),
         "attributes": list(ATTRIBUTES),
         "market": ["market_value", "asking_price", "transfer_fee", "wage", "annual_wage", "contract_months", "owned"],
-        "notes": "FMST26 labels such as Guide Value, Minutes Played, Non-Penalty xG, Tackles Completed, Saves per 90 and xG Prevented are canonicalised automatically. Supply league metadata when the export omits it; do not mix raw totals and per-90 columns without labels.",
+        "notes": "Current squad plus the broadest realistic transfer market. FMST26 labels such as Guide Value, Minutes Played, Non-Penalty xG, Tackles Completed, Saves per 90 and xG Prevented are canonicalised automatically. Supply league metadata when the export omits it; do not mix raw totals and per-90 columns without labels.",
     },
 }

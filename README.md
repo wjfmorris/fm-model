@@ -1,44 +1,56 @@
 # FM Model
 
-A data-driven Football Manager 26 recruitment tool with an installable `fm_model` backend and a Streamlit dashboard for save setup, season targets, goal-driver analysis and player recruitment.
+A data-driven Football Manager 26 Moneyball planner. It connects a finishing-position target to required GF/GA, forecasts the current squad, identifies expensive/replaceable players, learns player outcomes from historical attributes, recommends position-specific recruit profiles and targets, and re-forecasts the team after the proposed transfers.
 
 ## What the model does
 
-The intended workflow is:
+The primary workflow is:
 
-1. upload completed league tables for several seasons;
-2. choose a league, finishing-position target and confidence level;
-3. estimate the goals-scored/goals-conceded combinations associated with that finish;
-4. upload team metrics to learn which attacking and defensive processes predict those goal totals;
-5. upload an FMST26/player-search export to score players against role- and league-relative replacement levels;
-6. compare owned players with the market and recalculate the effect of possible recruitment decisions.
+1. collect completed league tables for several seasons and learn the GF/GA combinations associated with a requested finish;
+2. collect every club's historical team metrics and learn which processes predict goals for and goals against;
+3. optionally collect historical player-season exports with **all available attributes and broad performance statistics**, so the last season can be held out while the model learns attribute → player-outcome relationships;
+4. upload the current squad plus the broadest realistic transfer market, including positions, minutes, statistics, attributes, prices, wages and contracts;
+5. choose your club, formation, target position and evidence threshold;
+6. forecast the current team's next-season GF/GA from its latest underlying team-process profile, adjusted from the previous XI to the current modelled XI when historical player seasons are available;
+7. calculate the attack/defence gap to the target;
+8. identify owned players whose market price looks high relative to contribution and replaceability;
+9. simulate player-for-player upgrades by position, using observed statistics plus historical attribute predictions where the evidence supports them;
+10. return minimum screening profiles, actual candidate shortlists, a value-aware transfer package and the combined after-transfer GF/GA/finishing-position forecast.
 
-The modelling code remains independent from Streamlit. `streamlit_app.py` is a thin interface over the tested package API rather than a second copy of the modelling logic.
+The app deliberately keeps **CA, PA, reputation and price out of the football-performance models**. Price/wage information is only used after football contribution has been estimated, so the model can search for market inefficiencies instead of reproducing FM's hidden ability ratings.
 
 ## Repository layout
 
 ```text
 fm-model/
-├── streamlit_app.py\n├── .streamlit/\n│   └── config.toml\n├── src/
+├── streamlit_app.py
+├── .streamlit/
+│   └── config.toml
+├── src/
 │   └── fm_model/
 │       ├── __init__.py
-│       ├── __main__.py
+│       ├── app_support.py
 │       ├── catalogue.py
-│       ├── cli.py
+│       ├── collection.py
 │       ├── data.py
 │       ├── drivers.py
-│       ├── errors.py
 │       ├── league.py
 │       ├── learning.py
+│       ├── outcomes.py
 │       ├── pipeline.py
-│       └── players.py
+│       ├── planning.py
+│       ├── players.py
+│       └── roles.py
 ├── tests/
-│   └── test_model.py
+│   ├── test_model.py
+│   ├── test_app_support.py
+│   ├── test_squad_planning.py
+│   └── test_streamlit_app.py
 ├── data/
 │   └── templates/
-│       ├── README.md
 │       ├── league_table.csv
 │       ├── team_metrics.csv
+│       ├── player_history.csv
 │       └── player_export.csv
 ├── docs/
 │   ├── fm26-data.md
@@ -66,9 +78,17 @@ Fits separate attacking and defensive models using available team metrics such a
 
 Links learned team-driver fields to player statistics, derives per-90 rates from labelled raw totals, compares players with league-and-role references, and produces contribution components. `decisions()` compares contribution with local market evidence and returns `BUY`, `SELL`, `KEEP_REVIEW`, `WATCH`, `INSUFFICIENT_PRICE_DATA` or `INSUFFICIENT_PERFORMANCE_DATA`, together with reasons and confidence flags.
 
+### PlayerOutcomeModel
+
+Uses historical player-season rows to learn how attributes predict observable player outcomes. It separates chance generation, chance creation, finishing relative to xG, defensive output and goalkeeper xG prevention where the available columns support those targets. The final historical season is held out for validation. When there is not enough history, the app falls back to descriptive candidate profiles rather than pretending attribute weights were learned.
+
+### SquadPlanner
+
+Connects the model layers into one planning result. It selects a formation-aware current XI, adjusts the latest team-process profile from the previous XI to the current XI when historical player data allows, forecasts next-season GF/GA, calculates the goal gap, evaluates sales, simulates market replacements by position, builds minimum stat/attribute profiles and candidate shortlists, and re-runs the team goal model after the proposed transfer package.
+
 ### MoneyballModel
 
-Orchestrates the three layers and serializes/deserializes fitted state for later use by the Streamlit app.
+Orchestrates the league, goal-driver, historical attribute, player-valuation and squad-planning layers and serializes/deserializes fitted state for the Streamlit app.
 
 ## Install
 
@@ -90,7 +110,7 @@ Backend plus spreadsheet/HTML import support:
 pip install -e ".[imports]"
 ```
 
-Backend plus the dependencies intended for the future Streamlit app:
+Backend plus the Streamlit app dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -105,7 +125,7 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-The dashboard includes a synthetic **Load example data** path, so every main screen can be tested before importing a real FM26 save. For real data, upload league-table history, team-performance history and an FMST26/player-search export in the sidebar.
+The dashboard includes a synthetic **Load example data** path, so every main screen can be tested before importing a real FM26 save. For real data, the sidebar accepts multiple league-table files, multiple team-history files, multiple historical player-season files, and one current squad/market export. The **Data collection & setup** tab gives the exact columns, clubs, positions and seasons to collect before you start exporting.
 
 ## Verify the project
 
@@ -124,7 +144,9 @@ from fm_model import MoneyballModel, read_table
 model = MoneyballModel()
 model.fit_league(read_table("data/templates/league_table.csv"))
 model.fit_drivers(read_table("data/templates/team_metrics.csv"))
-model.fit_players(read_table("data/templates/player_export.csv"))
+model.fit_player_outcomes(read_table("data/templates/player_history.csv"))
+players = read_table("data/templates/player_export.csv")
+model.fit_players(players)
 
 scenario = model.target_scenario(
     "Example League",
@@ -134,9 +156,23 @@ scenario = model.target_scenario(
 
 print(scenario["recommended"])
 print(scenario["frontier"])
+
+plan = model.squad_plan(
+    "Example League",
+    position=4,
+    players=players,
+    club="Club F",
+    probability=0.70,
+    formation="4-2-3-1",
+    max_recruits=3,
+)
+print(plan["current_forecast"])
+print(plan["sale_candidates"])
+print(plan["position_opportunities"])
+print(plan["after_transfer_forecast"])
 ```
 
-The public package also exposes `read_player_export`, `DATA_CATALOGUE`, `DataError`, `LeagueModel`, `GoalDriverModel` and `PlayerValuationModel`.
+The public package also exposes `read_player_export`, `DATA_CATALOGUE`, `DataError`, `LeagueModel`, `GoalDriverModel`, `PlayerValuationModel`, `PlayerOutcomeModel`, `SquadPlanner` and the formation/position helpers.
 
 ## FMST26 player exports
 
@@ -158,7 +194,7 @@ model.fit_players(players)
 
 The importer recognizes labels including `Guide Value`, `Minutes Played`, `Non-Penalty xG`, `Tackles Completed`, `Saves per 90` and `xG Prevented`. Rows without minutes are retained but cannot receive the same performance confidence as players with meaningful playing-time samples.
 
-Displayed price/attribute ranges are never silently averaged. The eventual UI should let the user choose how a range is handled rather than hiding that assumption.
+Displayed price/attribute ranges are never silently averaged. The UI makes the user choose how a range is handled rather than hiding that assumption.
 
 ## Input contracts
 
@@ -194,7 +230,7 @@ Useful market fields include:
 
 `market_value, asking_price, transfer_fee, wage, annual_wage, contract_months, owned`
 
-FM26 separates in-possession and out-of-possession tactical behaviour, so `role_group` should represent the role family actually being evaluated rather than only a broad nominal position where possible.
+The planner accepts native FM position labels such as `D (C)`, `D (R)`, `M (C)`, `AM (R)` and `ST (C)` and maps them into stable planning groups. Keep the original position text in the export; the app handles the grouping.
 
 ## CLI
 
