@@ -1199,6 +1199,15 @@ def render_squad_plan():
         f"a modelled finishing position of about **{_fmt(current['predicted_position'], 1)}**."
     )
     st.caption(current.get("evidence", ""))
+    squad_adjustment = current.get("squad_adjustment", {})
+    if squad_adjustment:
+        if squad_adjustment.get("applied"):
+            st.caption(
+                f"Current-squad adjustment applied across {int(squad_adjustment.get('replacements', 0))} "
+                "position-matched starter replacements from the latest historical XI."
+            )
+        else:
+            st.caption(f"Current-squad adjustment not applied: {squad_adjustment.get('reason', 'insufficient history')}")
 
     g1, g2 = st.columns(2)
     g1.metric("Attacking gap", f"+{_fmt(gap['additional_goals_for'], 1)} goals")
