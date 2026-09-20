@@ -147,6 +147,10 @@ class PlayerOutcomeModel:
             outcome_reports = {}
 
             global_rows = prepared[prepared[target].notna()].copy()
+            if outcome == "goalkeeping":
+                global_rows = global_rows[global_rows["canonical_position"].eq("GK")]
+            else:
+                global_rows = global_rows[~global_rows["canonical_position"].eq("GK")]
             if self._enough(global_rows, attributes):
                 try:
                     model = LearnedRegressor(
@@ -160,22 +164,6 @@ class PlayerOutcomeModel:
                     outcome_reports["__all__"] = model.report
                 except DataError as exc:
                     skipped[f"{outcome}:global"] = str(exc)
-
-            for role, subset in prepared[prepared[target].notna()].groupby("canonical_position"):
-                if role == "OTHER" or not self._enough(subset, attributes, role_specific=True):
-                    continue
-                try:
-                    model = LearnedRegressor(
-                        attributes,
-                        ["league"],
-                        log_target=False,
-                        nonnegative=nonnegative,
-                        seed=self.seed,
-                    ).fit(subset.copy(), target)
-                    self.models[outcome][str(role)] = model
-                    outcome_reports[str(role)] = model.report
-                except DataError as exc:
-                    skipped[f"{outcome}:{role}"] = str(exc)
 
             if outcome_reports:
                 reports[outcome] = outcome_reports
