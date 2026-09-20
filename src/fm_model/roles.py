@@ -34,14 +34,20 @@ def canonical_role(value) -> str:
         return "GK"
     if tokens.intersection({"ST", "CF"}) or "STRIKER" in compact or "FORWARD" in compact:
         return "ST"
-    if tokens.intersection({"AML", "AMR", "AMC", "AM", "LW", "RW"}) or "ATTACKING MID" in compact or "WINGER" in compact:
+
+    # FM commonly displays positions as D (C), WB (L), M (C), AM (R), ST (C),
+    # sometimes with several positions in one string. Normalisation above turns
+    # these into token pairs such as {"D", "C"} or {"AM", "R"}.
+    if "AM" in tokens or tokens.intersection({"AML", "AMR", "AMC", "LW", "RW"}) or "ATTACKING MID" in compact or "WINGER" in compact:
         return "AM_W"
-    if tokens.intersection({"WBL", "WBR", "DL", "DR", "LB", "RB", "FB", "WB"}) or "WING BACK" in compact or "FULL BACK" in compact:
+    if "WB" in tokens or tokens.intersection({"WBL", "WBR", "DL", "DR", "LB", "RB", "FB"}) or "WING BACK" in compact or "FULL BACK" in compact:
         return "FB_WB"
-    if tokens.intersection({"DC", "CB", "SW"}) or "CENTRE BACK" in compact or "CENTER BACK" in compact:
+    if tokens.intersection({"DC", "CB", "SW"}) or ("D" in tokens and "C" in tokens) or "CENTRE BACK" in compact or "CENTER BACK" in compact:
         return "CB"
-    if tokens.intersection({"DM", "MC", "CM", "DMC"}) or "CENTRAL MID" in compact or "DEFENSIVE MID" in compact:
+    if "DM" in tokens or tokens.intersection({"MC", "CM", "DMC"}) or ("M" in tokens and "C" in tokens) or "CENTRAL MID" in compact or "DEFENSIVE MID" in compact:
         return "CM_DM"
+    if "D" in tokens and tokens.intersection({"L", "R"}):
+        return "FB_WB"
     return "OTHER"
 
 
