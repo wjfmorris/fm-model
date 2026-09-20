@@ -7,6 +7,7 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 
+from .data import season_number
 from .errors import DataError, NotFittedError
 from .players import ATTRIBUTE_PROXY
 from .roles import FORMATION_PRESETS, ROLE_LABELS, canonical_role, formation_slots
@@ -78,7 +79,10 @@ class SquadPlanner:
             raise DataError("Select your club so the app can forecast the current team rather than the league median.")
 
         if "season" in f:
-            season_values = pd.to_numeric(f["season"], errors="coerce")
+            try:
+                season_values = f["season"].map(season_number)
+            except DataError:
+                season_values = pd.to_numeric(f["season"], errors="coerce")
             if season_values.notna().any():
                 latest = season_values.max()
                 f = f[season_values.eq(latest)]
@@ -102,6 +106,107 @@ class SquadPlanner:
             "attack_out_of_range_features": int(prediction["attack_out_of_range_features"].iloc[0]),
             "defence_out_of_range_features": int(prediction["defence_out_of_range_features"].iloc[0]),
         }
+
+
+    def _historical_current_adjustment(self, baseline, scored, starter_ids, slots, club, matches):
+        """Move the latest club profile from its historical XI to the current owned XI."""
+
+        outcome = self.outcome_model
+        if outcome is None or not getattr(outcome, "available", False):
+            return baseline, {"goals_for": 0.0, "goals_against_reduction": 0.0}, {
+                "applied": False,
+                "reason": "No validated historical player-outcome layer is available.",
+                "replacements": 0,
+            }
+        history = getattr(outcome, "frame", None)
+        if history is None or history.empty or "team_id" not in history or "season" not in history:
+            return baseline, {"goals_for": 0.0, "goals_against_reduction": 0.0}, {
+                "applied": False,
+                "reason": "Historical player rows do not contain club and season identifiers.",
+                "replacements": 0,
+            }
+
+        hist = history[history["team_id"].map(self._normal).eq(self._normal(club))].copy()
+        if hist.empty:
+            return baseline, {"goals_for": 0.0, "goals_against_reduction": 0.0}, {
+                "applied": False,
+                "reason": "No historical player-season rows match the selected club.",
+                "replacements": 0,
+            }
+        try:
+            years = hist["season"].map(season_number)
+            hist = hist[years.eq(years.max())].copy()
+        except DataError:
+            pass
+        if "canonical_position" not in hist:
+            hist["canonical_position"] = hist["role_group"].map(canonical_role)
+
+        try:
+            predictions = outcome.predict_outcomes(hist)
+            for col in predictions:
+                hist[col] = predictions[col].to_numpy()
+        except (DataError, NotFittedError):
+            pass
+
+        current = scored[scored["_row_id"].isin(starter_ids)].copy()
+        adjusted = baseline.copy()
+        finishing_adjustment = 0.0
+        goalkeeping_reduction = 0.0
+        replacements = 0
+
+        for position, count in slots.items():
+            old_group = hist[hist["canonical_position"].eq(position)].copy()
+            new_group = current[current["canonical_position"].eq(position)].copy()
+            if old_group.empty or new_group.empty:
+                continue
+            old_group = old_group.sort_values("minutes", ascending=False, na_position="last").head(int(count))
+            new_group = new_group.sort_values(
+                ["football_contribution_units", "minutes"],
+                ascending=[False, False],
+                na_position="last",
+            ).head(int(count))
+            for (_, outgoing), (_, incoming) in zip(old_group.iterrows(), new_group.iterrows()):
+                adjusted, used = self._apply_replacement(adjusted, outgoing, incoming)
+                if used:
+                    replacements += 1
+                if position == "GK":
+                    inc = self._finite(incoming.get("predicted_goalkeeping"))
+                    out = self._finite(outgoing.get("predicted_goalkeeping")) or 0.0
+                    if inc is not None:
+                        goalkeeping_reduction += (inc - out) * self.lineup_share * int(matches)
+                else:
+                    inc = self._finite(incoming.get("predicted_finishing"))
+                    out = self._finite(outgoing.get("predicted_finishing")) or 0.0
+                    if inc is not None:
+                        finishing_adjustment += (inc - out) * self.lineup_share * int(matches)
+
+        return adjusted, {
+            "goals_for": float(finishing_adjustment),
+            "goals_against_reduction": float(goalkeeping_reduction),
+        }, {
+            "applied": bool(replacements),
+            "reason": (
+                "Latest historical starters were replaced position-by-position with the current owned XI."
+                if replacements else
+                "Historical/current position coverage was insufficient to adjust the club profile."
+            ),
+            "replacements": int(replacements),
+        }
+
+    def _forecast_with_adjustment(self, baseline, matches, adjustment=None):
+        forecast = self._forecast(baseline, matches)
+        adjustment = adjustment or {}
+        forecast["goals_for"] = max(
+            forecast["goals_for"] + float(adjustment.get("goals_for", 0.0)), 0.0
+        )
+        forecast["goals_against"] = max(
+            forecast["goals_against"] - float(adjustment.get("goals_against_reduction", 0.0)), 0.0
+        )
+        forecast["attribute_finishing_adjustment"] = float(adjustment.get("goals_for", 0.0))
+        forecast["attribute_goalkeeping_reduction"] = float(
+            adjustment.get("goals_against_reduction", 0.0)
+        )
+        return forecast
 
     def _score_players(self, players, matches):
         scored = self.player_model.decisions(players, matches=int(matches)).reset_index(drop=True)
@@ -227,7 +332,7 @@ class SquadPlanner:
         })
         return pd.Series(row)
 
-    def _simulate_candidates(self, baseline, current_forecast, outgoing, candidates, matches):
+    def _simulate_candidates(self, baseline, current_forecast, outgoing, candidates, matches, base_adjustment=None):
         if candidates.empty:
             return pd.DataFrame()
         modified_rows = []
@@ -239,8 +344,15 @@ class SquadPlanner:
         batch = pd.DataFrame(modified_rows).reset_index(drop=True)
         prediction = self.driver_model.predict(batch, matches=int(matches))
         result = candidates.reset_index(drop=True).copy()
-        projected_for = prediction["predicted_goals_for"].to_numpy(dtype=float)
-        projected_against = prediction["predicted_goals_against"].to_numpy(dtype=float)
+        base_adjustment = base_adjustment or {}
+        projected_for = (
+            prediction["predicted_goals_for"].to_numpy(dtype=float)
+            + float(base_adjustment.get("goals_for", 0.0))
+        )
+        projected_against = (
+            prediction["predicted_goals_against"].to_numpy(dtype=float)
+            - float(base_adjustment.get("goals_against_reduction", 0.0))
+        )
 
         # Historical attribute models add two same-unit corrections that team
         # process statistics cannot capture directly: finishing above/below xG,
@@ -280,7 +392,7 @@ class SquadPlanner:
         return score
 
     def _position_candidates(self, baseline, current_forecast, scored, starters, position, slots, matches,
-                             attack_gap, defence_gap):
+                             attack_gap, defence_gap, base_adjustment=None):
         market = scored[
             (~self._owned_mask(scored))
             & scored["canonical_position"].eq(position)
@@ -295,7 +407,9 @@ class SquadPlanner:
 
         simulations = []
         for _, outgoing in outgoing_rows.iterrows():
-            sim = self._simulate_candidates(baseline, current_forecast, outgoing, market, matches)
+            sim = self._simulate_candidates(
+                baseline, current_forecast, outgoing, market, matches, base_adjustment=base_adjustment
+            )
             if not sim.empty:
                 simulations.append(sim)
         if not simulations:
@@ -501,7 +615,7 @@ class SquadPlanner:
             })
         return result
 
-    def _simulate_combined_plan(self, baseline, scored, recommendations, matches):
+    def _simulate_combined_plan(self, baseline, scored, recommendations, matches, base_adjustment=None):
         modified = baseline.copy()
         transfers = []
         used_outgoing = set()
@@ -525,7 +639,7 @@ class SquadPlanner:
                 "outgoing_market_price": self._finite(outgoing.get("market_price")),
             })
 
-        prediction = self._forecast(modified, matches)
+        prediction = self._forecast_with_adjustment(modified, matches, base_adjustment)
 
         # Apply the same finishing/GK corrections used in individual replacement
         # scenarios to the combined transfer package.
@@ -570,6 +684,7 @@ class SquadPlanner:
         requested_probability,
         context,
         max_recruits,
+        base_adjustment=None,
     ):
         """Choose the cheapest recommendation subset that reaches the requested target.
 
@@ -580,7 +695,7 @@ class SquadPlanner:
 
         if not opportunities:
             forecast, transfers, net_spend = self._simulate_combined_plan(
-                baseline, scored, [], context["matches"]
+                baseline, scored, [], context["matches"], base_adjustment=base_adjustment
             )
             evaluation = self.league_model.evaluate(
                 league,
@@ -606,7 +721,7 @@ class SquadPlanner:
         for size in range(1, limit + 1):
             for subset in combinations(opportunities, size):
                 forecast, transfers, net_spend = self._simulate_combined_plan(
-                    baseline, scored, list(subset), context["matches"]
+                    baseline, scored, list(subset), context["matches"], base_adjustment=base_adjustment
                 )
                 if not transfers:
                     continue
@@ -633,7 +748,7 @@ class SquadPlanner:
 
         if not candidates:
             forecast, transfers, net_spend = self._simulate_combined_plan(
-                baseline, scored, [], context["matches"]
+                baseline, scored, [], context["matches"], base_adjustment=base_adjustment
             )
             return forecast, transfers, net_spend, {
                 "packages_considered": 0,
@@ -709,21 +824,31 @@ class SquadPlanner:
         )
         context = scenario["context"]
         baseline, baseline_evidence = self._baseline_team(league, club)
-        current = self._forecast(baseline, context["matches"])
-        target = scenario["recommended"]
-        attack_gap = max(float(target["goals_for"]) - current["goals_for"], 0.0)
-        defence_gap = max(current["goals_against"] - float(target["goals_against"]), 0.0)
 
         scored = self._score_players(players, context["matches"])
         slots = formation_slots(formation)
         starter_ids, missing = self._select_starters(scored, slots)
+        current_baseline, current_adjustment, squad_adjustment_evidence = self._historical_current_adjustment(
+            baseline,
+            scored,
+            starter_ids,
+            slots,
+            club,
+            context["matches"],
+        )
+        current = self._forecast_with_adjustment(
+            current_baseline, context["matches"], current_adjustment
+        )
+        target = scenario["recommended"]
+        attack_gap = max(float(target["goals_for"]) - current["goals_for"], 0.0)
+        defence_gap = max(current["goals_against"] - float(target["goals_against"]), 0.0)
 
         opportunities = []
         simulations_by_position = {}
         if attack_gap > 0 or defence_gap > 0:
             for role, slot_count in slots.items():
                 simulations, recommendation = self._position_candidates(
-                    baseline,
+                    current_baseline,
                     current,
                     scored,
                     starter_ids,
@@ -732,6 +857,7 @@ class SquadPlanner:
                     context["matches"],
                     attack_gap,
                     defence_gap,
+                    base_adjustment=current_adjustment,
                 )
                 simulations_by_position[role] = simulations
                 opportunities.extend(recommendation)
@@ -741,7 +867,7 @@ class SquadPlanner:
             reverse=True,
         )
         after, transfer_plan, net_spend, package_selection = self._select_transfer_package(
-            baseline,
+            current_baseline,
             scored,
             opportunities,
             league=league,
@@ -749,6 +875,7 @@ class SquadPlanner:
             requested_probability=float(probability),
             context=context,
             max_recruits=int(max_recruits),
+            base_adjustment=current_adjustment,
         )
 
         current_eval = self.league_model.evaluate(
@@ -810,6 +937,7 @@ class SquadPlanner:
                     "Goal-driver prediction if the latest observed team-process profile repeats next season."
                 ),
                 "baseline_evidence": baseline_evidence,
+                "squad_adjustment": squad_adjustment_evidence,
             },
             "gap": {
                 "additional_goals_for": float(attack_gap),
@@ -838,5 +966,6 @@ class SquadPlanner:
                 ),
                 "lineup_share": self.lineup_share,
                 "warnings": warnings,
+                "current_squad_adjustment": squad_adjustment_evidence,
             },
         }
