@@ -42,7 +42,7 @@ class SquadPlanningTests(unittest.TestCase):
             "Example League",
             4,
             self.frames["players"],
-            club="Club A",
+            club="Club F",
             probability=0.60,
             formation="4-2-3-1",
             max_recruits=3,
