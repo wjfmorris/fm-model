@@ -76,6 +76,8 @@ class SquadPlanningTests(unittest.TestCase):
         self.assertGreaterEqual(target["goals_against"], 0)
         self.assertGreater(plan["current_forecast"]["goals_for"], 0)
         self.assertGreater(plan["current_forecast"]["goals_against"], 0)
+        self.assertTrue(plan["current_forecast"]["squad_adjustment"]["applied"])
+        self.assertGreater(plan["current_forecast"]["squad_adjustment"]["replacements"], 0)
 
         opportunities = plan["position_opportunities"]
         if opportunities:
