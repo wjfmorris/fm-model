@@ -23,26 +23,34 @@ The app deliberately keeps **CA, PA, reputation and price out of the football-pe
 
 ```text
 fm-model/
-├── streamlit_app.py\n├── .streamlit/\n│   └── config.toml\n├── src/
+├── streamlit_app.py
+├── .streamlit/
+│   └── config.toml
+├── src/
 │   └── fm_model/
 │       ├── __init__.py
-│       ├── __main__.py
+│       ├── app_support.py
 │       ├── catalogue.py
-│       ├── cli.py
+│       ├── collection.py
 │       ├── data.py
 │       ├── drivers.py
-│       ├── errors.py
 │       ├── league.py
 │       ├── learning.py
+│       ├── outcomes.py
 │       ├── pipeline.py
-│       └── players.py
+│       ├── planning.py
+│       ├── players.py
+│       └── roles.py
 ├── tests/
-│   └── test_model.py
+│   ├── test_model.py
+│   ├── test_app_support.py
+│   ├── test_squad_planning.py
+│   └── test_streamlit_app.py
 ├── data/
 │   └── templates/
-│       ├── README.md
 │       ├── league_table.csv
 │       ├── team_metrics.csv
+│       ├── player_history.csv
 │       └── player_export.csv
 ├── docs/
 │   ├── fm26-data.md
@@ -102,7 +110,7 @@ Backend plus spreadsheet/HTML import support:
 pip install -e ".[imports]"
 ```
 
-Backend plus the dependencies intended for the future Streamlit app:
+Backend plus the Streamlit app dependencies:
 
 ```bash
 pip install -r requirements.txt
@@ -153,7 +161,7 @@ plan = model.squad_plan(
     "Example League",
     position=4,
     players=players,
-    club="Club A",
+    club="Club F",
     probability=0.70,
     formation="4-2-3-1",
     max_recruits=3,
@@ -164,7 +172,7 @@ print(plan["position_opportunities"])
 print(plan["after_transfer_forecast"])
 ```
 
-The public package also exposes `read_player_export`, `DATA_CATALOGUE`, `DataError`, `LeagueModel`, `GoalDriverModel` and `PlayerValuationModel`.
+The public package also exposes `read_player_export`, `DATA_CATALOGUE`, `DataError`, `LeagueModel`, `GoalDriverModel`, `PlayerValuationModel`, `PlayerOutcomeModel`, `SquadPlanner` and the formation/position helpers.
 
 ## FMST26 player exports
 
@@ -186,7 +194,7 @@ model.fit_players(players)
 
 The importer recognizes labels including `Guide Value`, `Minutes Played`, `Non-Penalty xG`, `Tackles Completed`, `Saves per 90` and `xG Prevented`. Rows without minutes are retained but cannot receive the same performance confidence as players with meaningful playing-time samples.
 
-Displayed price/attribute ranges are never silently averaged. The eventual UI should let the user choose how a range is handled rather than hiding that assumption.
+Displayed price/attribute ranges are never silently averaged. The UI makes the user choose how a range is handled rather than hiding that assumption.
 
 ## Input contracts
 
@@ -222,7 +230,7 @@ Useful market fields include:
 
 `market_value, asking_price, transfer_fee, wage, annual_wage, contract_months, owned`
 
-FM26 separates in-possession and out-of-possession tactical behaviour, so `role_group` should represent the role family actually being evaluated rather than only a broad nominal position where possible.
+The planner accepts native FM position labels such as `D (C)`, `D (R)`, `M (C)`, `AM (R)` and `ST (C)` and maps them into stable planning groups. Keep the original position text in the export; the app handles the grouping.
 
 ## CLI
 
