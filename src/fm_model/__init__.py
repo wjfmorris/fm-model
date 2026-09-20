@@ -6,6 +6,9 @@ from .drivers import GoalDriverModel
 from .league import LeagueModel
 from .pipeline import MoneyballModel
 from .players import PlayerValuationModel
+from .outcomes import PlayerOutcomeModel
+from .planning import SquadPlanner
+from .roles import FORMATION_PRESETS, ROLE_LABELS, canonical_role
 from .catalogue import DATA_CATALOGUE
 
 __all__ = [
@@ -15,6 +18,11 @@ __all__ = [
     "LeagueModel",
     "GoalDriverModel",
     "PlayerValuationModel",
+    "PlayerOutcomeModel",
+    "SquadPlanner",
+    "FORMATION_PRESETS",
+    "ROLE_LABELS",
+    "canonical_role",
     "MoneyballModel",
     "prepare_player_export",
     "read_player_export",
