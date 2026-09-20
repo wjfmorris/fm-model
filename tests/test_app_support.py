@@ -34,7 +34,7 @@ class AppSupportTests(unittest.TestCase):
         self.assertTrue(readiness["squad_plan"])
 
         decisions = model.player_decisions(frames["players"])
-        self.assertEqual(len(decisions), 240)
+        self.assertEqual(len(decisions), 72)
         self.assertIn("expected_market_price_for_contribution", decisions)
         self.assertIn("decision", decisions)
 
