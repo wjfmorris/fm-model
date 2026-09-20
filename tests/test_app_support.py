@@ -91,11 +91,5 @@ class AppSupportTests(unittest.TestCase):
         self.assertEqual(infer_season_from_name("team-2024-25.csv"), 2024)
         self.assertIsNone(infer_season_from_name("players.csv"))
 
-    def test_season_is_inferred_from_export_filename(self):
-        self.assertEqual(infer_season_from_name("players_2025_26.csv"), 2025)
-        self.assertEqual(infer_season_from_name("league-2024-25.csv"), 2024)
-        self.assertIsNone(infer_season_from_name("players.csv"))
-
-
 if __name__ == "__main__":
     unittest.main()
