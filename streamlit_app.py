@@ -10,14 +10,17 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from fm_model import DATA_CATALOGUE, DataError, MoneyballModel, read_table
+from fm_model import DATA_CATALOGUE, DataError, FORMATION_PRESETS, ROLE_LABELS, MoneyballModel, read_table
+from fm_model.collection import collection_plan
 from fm_model.app_support import (
     OWNERSHIP_MODES,
     build_model,
     clone_upload,
     frame_to_csv_bytes,
     load_example_frames,
+    merge_table_uploads,
     read_player_for_app,
+    read_player_history_for_app,
     serialise_model,
 )
 
@@ -36,6 +39,7 @@ DECISIONS_KEY = "player_decisions"
 SOURCE_KEY = "model_source"
 SCENARIO_KEY = "target_scenario"
 ROUTE_KEY = "driver_route"
+SQUAD_PLAN_KEY = "squad_plan"
 
 
 def _fmt(value: Any, digits=1):
@@ -73,7 +77,7 @@ def _fmt_money(value: Any, symbol="£"):
 
 
 def _clear_state():
-    for key in (MODEL_KEY, FRAMES_KEY, DECISIONS_KEY, SOURCE_KEY, SCENARIO_KEY, ROUTE_KEY):
+    for key in (MODEL_KEY, FRAMES_KEY, DECISIONS_KEY, SOURCE_KEY, SCENARIO_KEY, ROUTE_KEY, SQUAD_PLAN_KEY):
         st.session_state.pop(key, None)
 
 
@@ -83,6 +87,7 @@ def _store_model(model: MoneyballModel, frames: dict[str, pd.DataFrame | None], 
     st.session_state[SOURCE_KEY] = source
     st.session_state.pop(SCENARIO_KEY, None)
     st.session_state.pop(ROUTE_KEY, None)
+    st.session_state.pop(SQUAD_PLAN_KEY, None)
 
     decisions = None
     players = frames.get("players")
@@ -100,8 +105,9 @@ def _infer_single_league(frame: pd.DataFrame | None):
 
 
 def _build_from_sidebar(
-    league_upload,
-    team_upload,
+    league_uploads,
+    team_uploads,
+    historical_player_uploads,
     player_upload,
     *,
     player_league,
@@ -111,10 +117,15 @@ def _build_from_sidebar(
     range_policy,
     include_all_available,
 ):
-    league_frame = read_table(clone_upload(league_upload)) if league_upload else None
-    team_frame = read_table(clone_upload(team_upload)) if team_upload else None
+    league_frame = merge_table_uploads(league_uploads) if league_uploads else None
+    team_frame = merge_table_uploads(team_uploads) if team_uploads else None
 
     league_context = player_league.strip() or _infer_single_league(league_frame)
+    historical_player_frame = read_player_history_for_app(
+        historical_player_uploads,
+        league=league_context,
+        range_policy=range_policy,
+    ) if historical_player_uploads else None
     player_frame = None
     if player_upload:
         player_frame = read_player_for_app(
@@ -129,12 +140,13 @@ def _build_from_sidebar(
     model = build_model(
         league_data=league_frame,
         team_data=team_frame,
+        historical_player_data=historical_player_frame,
         player_data=player_frame,
         include_all_available=include_all_available,
     )
     _store_model(
         model,
-        {"league": league_frame, "team": team_frame, "players": player_frame},
+        {"league": league_frame, "team": team_frame, "player_history": historical_player_frame, "players": player_frame},
         "Uploaded FM26 data",
     )
 
@@ -144,6 +156,7 @@ def _load_examples():
     model = build_model(
         league_data=frames["league"],
         team_data=frames["team"],
+        historical_player_data=frames.get("player_history"),
         player_data=frames["players"],
     )
     _store_model(model, frames, "Synthetic example data")
@@ -198,13 +211,22 @@ def render_sidebar():
             "League table history",
             type=["csv", "tsv", "html", "htm", "xlsx", "xlsm"],
             key="league_upload",
-            help="Completed league tables across at least two seasons for finishing-position targets.",
+            accept_multiple_files=True,
+            help="Upload several completed seasons at once. Each file needs a season column, or a filename such as league_2025_26.csv.",
         )
         team_upload = st.file_uploader(
             "Team performance history",
             type=["csv", "tsv", "html", "htm", "xlsx", "xlsm"],
             key="team_upload",
-            help="Team-season xG, shots, pressing, defensive and goalkeeping metrics.",
+            accept_multiple_files=True,
+            help="Upload all clubs for several seasons: xG, shots, chance creation, pressing, defensive and goalkeeping metrics.",
+        )
+        historical_player_upload = st.file_uploader(
+            "Historical player-season exports",
+            type=["csv", "tsv", "html", "htm", "xlsx", "xlsm"],
+            key="historical_player_upload",
+            accept_multiple_files=True,
+            help="All players, all clubs, several completed seasons. This is what lets the model learn which attributes predict player outcomes.",
         )
         player_upload = st.file_uploader(
             "Player pool / FMST26 export",
@@ -255,7 +277,7 @@ def render_sidebar():
             help="Protected outcome fields are still excluded. Leave this off for the most interpretable model.",
         )
 
-        has_upload = any(x is not None for x in (league_upload, team_upload, player_upload))
+        has_upload = bool(league_upload or team_upload or historical_player_upload or player_upload)
         if st.button(
             "Build / refresh model",
             type="primary",
@@ -268,6 +290,7 @@ def render_sidebar():
                     _build_from_sidebar(
                         league_upload,
                         team_upload,
+                        historical_player_upload,
                         player_upload,
                         player_league=player_league,
                         player_season=player_season,
@@ -289,7 +312,8 @@ def render_sidebar():
             st.write(
                 f"League targets: {'✅' if readiness['league_targets'] else '—'}  "
                 f"Goal drivers: {'✅' if readiness['goal_drivers'] else '—'}  "
-                f"Players: {'✅' if readiness['player_values'] else '—'}"
+                f"Players: {'✅' if readiness['player_values'] else '—'}  "
+                f"Attributes learned: {'✅' if readiness['attribute_outcomes'] else '—'}"
             )
 
 
