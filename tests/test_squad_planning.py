@@ -68,6 +68,8 @@ class SquadPlanningTests(unittest.TestCase):
         self.assertIn("selection_reason", plan["after_transfer_forecast"])
         self.assertGreaterEqual(plan["after_transfer_forecast"]["packages_considered"], 1)
         self.assertTrue(plan["model_evidence"]["attribute_outcomes"])
+        self.assertTrue(plan["current_forecast"]["squad_adjustment"]["applied"])
+        self.assertGreater(plan["current_forecast"]["squad_adjustment"]["replacements"], 0)
 
         target = plan["target"]["recommended"]
         self.assertGreaterEqual(target["goals_for"], 0)
@@ -81,6 +83,7 @@ class SquadPlanningTests(unittest.TestCase):
             self.assertIn("minimum_profile", first)
             self.assertIn("candidate_shortlist", first)
             self.assertGreater(len(first["candidate_shortlist"]), 0)
+            self.assertGreater(len(first["candidate_options"]), 0)
             profile = pd.DataFrame(first["minimum_profile"])
             if not profile.empty:
                 self.assertTrue(set(profile["type"]).issubset({"stat", "attribute"}))
