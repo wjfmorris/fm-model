@@ -1,74 +1,85 @@
 # Streamlit app architecture
 
-The modelling backend is intentionally independent from Streamlit. The implemented `streamlit_app.py` is a thin interface over the public API in `fm_model`, rather than duplicating modelling logic inside the UI.
+The Streamlit layer is deliberately thin. Statistical logic belongs in `src/fm_model/`; `streamlit_app.py` handles uploads, controls, visualisation and downloads.
 
-## Recommended entry point
+## Entry point
 
-`streamlit_app.py` is the repository-root entry point. Streamlit Community Cloud can use that file directly and install `requirements.txt`.
+Streamlit Community Cloud should use:
 
-The app should import from the public package:
+- repository: `wjfmorris/fm-model`
+- branch: `main`
+- entry point: `streamlit_app.py`
 
-```python
-from fm_model import (
-    DATA_CATALOGUE,
-    DataError,
-    MoneyballModel,
-    read_player_export,
-    read_table,
-)
-```
+Dependencies are installed from `requirements.txt`.
 
-Avoid importing private helpers from individual model modules unless a new public API is genuinely required.
+## App workflow
 
-## Intended app flow
+The primary path is now the **Complete squad plan**:
 
-1. Upload completed league-table history and call `read_table()`.
-2. Fit `MoneyballModel.fit_league()`.
-3. Upload team-performance history and call `fit_drivers()`.
-4. Upload an FMST26/player-search export with `read_player_export()`.
-5. Fit `fit_players()`.
-6. Use `readiness()` to show which model layers are available.
-7. Use `target_scenario()` for finishing-position goal targets.
-8. Use `explain_scenario()` for goal-driver explanations and an improvement route.
-9. Use `player_decisions()` for recruitment/squad decisions.
-10. Keep the fitted model in Streamlit session state and optionally expose `MoneyballModel.save()` / `load()` for persistence.
+1. Upload several completed league-table seasons.
+2. Upload matching team-performance history for every club.
+3. Optionally upload several historical player-season exports. These train the attribute → player-outcome layer with the latest historical season held out for validation.
+4. Upload the current squad plus the broadest realistic transfer-market pool.
+5. Fit the model and choose club, formation, target position, evidence threshold and maximum signings.
+6. `MoneyballModel.squad_plan()` returns:
+   - required GF/GA;
+   - current next-season GF/GA forecast from the latest team-process profile;
+   - attack/defence gap;
+   - players to consider selling;
+   - position upgrade opportunities;
+   - minimum stat/attribute screening profiles;
+   - current-market shortlists;
+   - a value-aware transfer package;
+   - combined post-transfer GF/GA, predicted position and target probability.
+
+The separate Season target, Goal drivers, Recruitment and Diagnostics tabs remain available for inspection.
 
 ## Upload handling
 
-`read_table()` and `read_player_export()` accept file-like objects, so Streamlit's `UploadedFile` can be passed directly.
+The app supports multiple historical files. A file may contain its own `season` column, or the season can be inferred from a filename such as:
 
-FMST26 exports may omit league, season and ownership context. Supply those explicitly:
-
-```python
-players = read_player_export(
-    uploaded_file,
-    league=selected_league,
-    season=selected_season,
-    owned=False,
-)
+```text
+league_2024_25.csv
+team_2024_25.csv
+players_2024_25.csv
 ```
 
-Displayed money ranges are deliberately not guessed. If an uploaded value is a range, the UI should make the user choose lower, upper or midpoint handling and pass that policy through the importer before fitting.
+Current player exports can omit league/season when that context is supplied in the sidebar. Ownership can come from an `owned` column or be inferred from the user's club.
 
-## Error handling
+Displayed money ranges are never silently averaged. The user explicitly chooses lower, midpoint, upper or error handling.
 
-Catch `DataError` for user-facing validation messages. Do not catch every exception and silently continue: unexpected exceptions should remain visible during development.
+## Data layers
+
+Keep the following concepts separate:
+
+- **League targets:** GF/GA → finishing position.
+- **Team goal drivers:** team process statistics → goals for/against.
+- **Historical player outcomes:** attributes → observable player outcomes such as xG/90, xA/key passes, finishing over xG, defensive output and goalkeeper xG prevention.
+- **Player valuation:** role-relative football contribution → comparable market price.
+- **Squad planning:** current team baseline + player replacement scenarios → transfer package.
+
+CA, PA, reputation, market value and wages are not predictors in the football-performance layers. Price is introduced only after contribution is estimated.
+
+## Evidence and fallbacks
+
+Historical player seasons are optional. Without enough chronological evidence, the app still produces recruitment profiles, but attribute thresholds are labelled **descriptive** rather than learned.
+
+The current team forecast assumes the latest observed team-process profile repeats next season. Replacement simulations modify that baseline using mapped player statistics and, where validated history supports it, attribute-predicted chance generation, finishing-over-xG and goalkeeper prevention. All outputs are scenario estimates, not causal guarantees.
 
 ## State boundaries
 
-A practical session state split is:
+Session state stores:
 
-- raw uploaded files / parsed frames;
-- `MoneyballModel`;
-- selected league / season / club;
-- target position and confidence;
-- current filter state for the recruitment table.
+- parsed league/team/player frames;
+- fitted `MoneyballModel`;
+- recruitment decisions;
+- selected target scenario;
+- driver route;
+- complete squad-plan result.
 
-Do not store mutable modelling state in module-level globals.
+Do not put mutable model state in module globals.
 
-## Deployment
-
-Local development:
+## Development
 
 ```bash
 python -m venv .venv
@@ -78,4 +89,4 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-The UI and backend are both present. Future UI changes should preserve this boundary: model logic belongs in `src/fm_model/`, while display and interaction logic belongs in `streamlit_app.py`.
+Automated tests boot the Streamlit app headlessly and exercise the synthetic end-to-end squad-plan workflow.
