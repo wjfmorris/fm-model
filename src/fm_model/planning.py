@@ -230,12 +230,12 @@ class SquadPlanner:
             return values.fillna(False)
         return values.astype(str).str.strip().str.lower().isin({"true", "1", "yes", "y", "owned", "ours", "current", "squad"})
 
-    def _select_starters(self, scored, slots):
-        owned = scored[self._owned_mask(scored)].copy()
+    def _select_lineup(self, scored, slots, *, owned_only):
+        pool = scored[self._owned_mask(scored)].copy() if owned_only else scored.copy()
         selected = []
         missing = {}
         for position, count in slots.items():
-            group = owned[owned["canonical_position"].eq(position)].copy()
+            group = pool[pool["canonical_position"].eq(position)].copy()
             group = group.sort_values(
                 ["football_contribution_units", "minutes"],
                 ascending=[False, False],
@@ -247,12 +247,149 @@ class SquadPlanner:
                 missing[position] = int(count - len(take))
         return selected, missing
 
+    def _select_starters(self, scored, slots):
+        return self._select_lineup(scored, slots, owned_only=True)
+
     def _feature_links(self):
         links = {}
         for direction in ("attack", "defence"):
             for team_feature, player_col in self.player_model.metric_map.get(direction, {}).items():
                 links.setdefault(team_feature, player_col)
         return links
+
+    def _score_historical_club(self, league, club, matches):
+        if self.outcome_model is None or not hasattr(self.outcome_model, "frame"):
+            return None
+        history = self.outcome_model.frame.copy()
+        if history.empty or "team_id" not in history:
+            return None
+        same_club = history["team_id"].astype(str).map(self._normal).eq(self._normal(club))
+        history = history[same_club]
+        if "league" in history:
+            same_league = history["league"].astype(str).eq(str(league))
+            if same_league.any():
+                history = history[same_league]
+        if history.empty:
+            return None
+        if "season" in history:
+            years = pd.to_numeric(history["season"], errors="coerce")
+            if years.notna().any():
+                history = history[years.eq(years.max())]
+        if history.empty:
+            return None
+        try:
+            scored = self.player_model.score(history, matches=int(matches)).reset_index(drop=True)
+        except (DataError, NotFittedError):
+            return None
+        scored["_row_id"] = np.arange(len(scored))
+        scored["canonical_position"] = scored["role_group"].map(canonical_role)
+        if getattr(self.outcome_model, "available", False):
+            try:
+                predictions = self.outcome_model.predict_outcomes(scored)
+                for col in predictions:
+                    scored[col] = predictions[col].to_numpy()
+            except (DataError, NotFittedError):
+                pass
+        return scored
+
+    def _lineup_feature_total(self, lineup, player_col, team_feature):
+        values = []
+        for _, row in lineup.iterrows():
+            value = self._metric_value(row, player_col, team_feature)
+            if value is not None:
+                values.append(value)
+        if not values:
+            return None
+        if team_feature.endswith(("_pct", "_rate", "_ratio")):
+            return float(np.mean(values))
+        return float(np.sum(values))
+
+    def _adjust_baseline_for_current_squad(
+        self, baseline, current_scored, starter_ids, slots, *, league, club, matches
+    ):
+        """Move the last team profile from last season's XI to the current XI.
+
+        This makes the initial next-season forecast squad-aware when historical
+        player seasons are available. Only player metrics already linked to learned
+        team drivers are allowed to alter the baseline.
+        """
+
+        if not starter_ids:
+            return baseline, {
+                "status": "team_profile_only",
+                "features_adjusted": 0,
+                "reason": "No complete current XI could be identified.",
+            }
+        current_lineup = current_scored[current_scored["_row_id"].isin(starter_ids)].copy()
+        if len(current_lineup) < sum(slots.values()):
+            return baseline, {
+                "status": "team_profile_only",
+                "features_adjusted": 0,
+                "reason": "The current export does not fill every formation slot.",
+            }
+
+        historical_scored = self._score_historical_club(league, club, matches)
+        if historical_scored is None:
+            return baseline, {
+                "status": "team_profile_only",
+                "features_adjusted": 0,
+                "reason": "No usable previous player-season squad was available for this club.",
+            }
+        historical_ids, historical_missing = self._select_lineup(
+            historical_scored, slots, owned_only=False
+        )
+        if historical_missing:
+            return baseline, {
+                "status": "team_profile_only",
+                "features_adjusted": 0,
+                "reason": "The historical player export does not fill the selected formation.",
+            }
+        historical_lineup = historical_scored[
+            historical_scored["_row_id"].isin(historical_ids)
+        ].copy()
+
+        modified = baseline.copy()
+        features = []
+        for team_feature, player_col in self._feature_links().items():
+            if team_feature not in modified:
+                continue
+            previous = self._lineup_feature_total(
+                historical_lineup, player_col, team_feature
+            )
+            current = self._lineup_feature_total(
+                current_lineup, player_col, team_feature
+            )
+            if previous is None or current is None:
+                continue
+            delta = (current - previous) * self.lineup_share
+            if not team_feature.endswith(("_p90", "_pct", "_rate", "_ratio")):
+                delta *= int(matches)
+            base = self._finite(modified[team_feature].iloc[0])
+            if base is None:
+                continue
+            updated = max(base + delta, 0.0)
+            if team_feature.endswith("_pct"):
+                updated = min(updated, 100.0)
+            modified.loc[modified.index[0], team_feature] = updated
+            features.append({
+                "team_feature": team_feature,
+                "player_metric": player_col,
+                "previous_xi": previous,
+                "current_xi": current,
+                "baseline_change": float(delta),
+            })
+
+        return modified, {
+            "status": "current_squad_adjusted" if features else "team_profile_only",
+            "features_adjusted": len(features),
+            "reason": (
+                "Latest team profile adjusted by the mapped performance difference "
+                "between last season's modelled XI and the current modelled XI."
+                if features else
+                "No player metrics overlapped with learned team drivers strongly enough to adjust the baseline."
+            ),
+            "features": features,
+        }
 
     @staticmethod
     def _finite(value):
@@ -914,6 +1051,11 @@ class SquadPlanner:
                 "The owned-player export does not fill every formation slot. "
                 f"Missing modelled starters: {detail}. Recruitment profiles for those groups use a replacement-level placeholder."
             )
+        if squad_baseline.get("status") != "current_squad_adjusted":
+            warnings.append(
+                "The starting GF/GA forecast could not be adjusted from last season's XI to the current XI: "
+                + squad_baseline.get("reason", "historical squad evidence was unavailable")
+            )
         if current["attack_out_of_range_features"] or current["defence_out_of_range_features"]:
             warnings.append(
                 "The current team profile contains driver values outside part of the historical training range."
@@ -937,6 +1079,7 @@ class SquadPlanner:
                     "Goal-driver prediction if the latest observed team-process profile repeats next season."
                 ),
                 "baseline_evidence": baseline_evidence,
+                "squad_adjustment": squad_baseline,
                 "squad_adjustment": squad_adjustment_evidence,
             },
             "gap": {
