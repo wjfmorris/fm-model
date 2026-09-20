@@ -29,6 +29,18 @@ OUTCOME_LABELS = {
 }
 
 
+# Role-specific fits are only trained where the outcome is football-relevant.
+# Every usable attribute is still considered by the global model first.
+ROLE_OUTCOMES = {
+    "ST": {"chance_generation", "chance_creation", "finishing"},
+    "AM_W": {"chance_generation", "chance_creation", "finishing"},
+    "CM_DM": {"chance_generation", "chance_creation", "defensive_output"},
+    "FB_WB": {"chance_creation", "defensive_output"},
+    "CB": {"defensive_output"},
+    "GK": {"goalkeeping"},
+}
+
+
 class PlayerOutcomeModel:
     """Chronologically validated attribute -> player-outcome models."""
 
@@ -164,6 +176,24 @@ class PlayerOutcomeModel:
                     outcome_reports["__all__"] = model.report
                 except DataError as exc:
                     skipped[f"{outcome}:global"] = str(exc)
+
+            for role, subset in global_rows.groupby("canonical_position"):
+                if outcome not in ROLE_OUTCOMES.get(str(role), set()):
+                    continue
+                if not self._enough(subset, attributes, role_specific=True):
+                    continue
+                try:
+                    role_model = LearnedRegressor(
+                        attributes,
+                        ["league"],
+                        log_target=False,
+                        nonnegative=nonnegative,
+                        seed=self.seed,
+                    ).fit(subset.copy(), target)
+                    self.models[outcome][str(role)] = role_model
+                    outcome_reports[str(role)] = role_model.report
+                except DataError as exc:
+                    skipped[f"{outcome}:{role}"] = str(exc)
 
             if outcome_reports:
                 reports[outcome] = outcome_reports
