@@ -648,10 +648,15 @@ class SquadPlanner:
             })
         return result
 
-    def _simulate_combined_plan(self, baseline, scored, recommendations, matches, base_adjustment=None):
+    def _prepare_combined_profile(self, baseline, scored, recommendations, matches):
+        """Build a transfer-adjusted team row without running the prediction model."""
+
         modified = baseline.copy()
         transfers = []
         used_outgoing = set()
+        finishing_adjustment = 0.0
+        goalkeeping_reduction = 0.0
+
         for rec in recommendations:
             incoming_rows = scored[scored["_row_id"].eq(rec["recommended_player_row_id"])]
             if incoming_rows.empty:
@@ -672,22 +677,7 @@ class SquadPlanner:
                 "outgoing_market_price": self._finite(outgoing.get("market_price")),
             })
 
-        prediction = self._forecast_with_adjustment(modified, matches, base_adjustment)
-
-        # Apply the same finishing/GK corrections used in individual replacement
-        # scenarios to the combined transfer package.
-        finishing_adjustment = 0.0
-        goalkeeping_reduction = 0.0
-        for transfer in transfers:
-            incoming_rows = scored[scored["_row_id"].eq(transfer["recommended_player_row_id"])]
-            outgoing_rows = scored[scored["_row_id"].eq(transfer["outgoing_row_id"])]
-            if incoming_rows.empty:
-                continue
-            incoming = incoming_rows.iloc[0]
-            outgoing = outgoing_rows.iloc[0] if not outgoing_rows.empty else self._placeholder(
-                scored, transfer["position"]
-            )
-            if transfer["position"] == "GK":
+            if rec["position"] == "GK":
                 inc = self._finite(incoming.get("predicted_goalkeeping"))
                 out = self._finite(outgoing.get("predicted_goalkeeping")) or 0.0
                 if inc is not None:
@@ -697,14 +687,28 @@ class SquadPlanner:
                 out = self._finite(outgoing.get("predicted_finishing")) or 0.0
                 if inc is not None:
                     finishing_adjustment += (inc - out) * self.lineup_share * int(matches)
-        prediction["goals_for"] = max(prediction["goals_for"] + finishing_adjustment, 0.0)
-        prediction["goals_against"] = max(prediction["goals_against"] - goalkeeping_reduction, 0.0)
-        prediction["attribute_finishing_adjustment"] = float(finishing_adjustment)
-        prediction["attribute_goalkeeping_reduction"] = float(goalkeeping_reduction)
 
         incoming_cost = sum(x["market_price"] or 0 for x in transfers)
         outgoing_value = sum(x["outgoing_market_price"] or 0 for x in transfers)
-        return prediction, transfers, float(incoming_cost - outgoing_value)
+        return modified, transfers, float(incoming_cost - outgoing_value), {
+            "goals_for": float(finishing_adjustment),
+            "goals_against_reduction": float(goalkeeping_reduction),
+        }
+
+    def _simulate_combined_plan(self, baseline, scored, recommendations, matches, base_adjustment=None):
+        modified, transfers, net_spend, transfer_adjustment = self._prepare_combined_profile(
+            baseline, scored, recommendations, matches
+        )
+        prediction = self._forecast_with_adjustment(modified, matches, base_adjustment)
+        prediction["goals_for"] = max(
+            prediction["goals_for"] + transfer_adjustment["goals_for"], 0.0
+        )
+        prediction["goals_against"] = max(
+            prediction["goals_against"] - transfer_adjustment["goals_against_reduction"], 0.0
+        )
+        prediction["attribute_finishing_adjustment"] = transfer_adjustment["goals_for"]
+        prediction["attribute_goalkeeping_reduction"] = transfer_adjustment["goals_against_reduction"]
+        return prediction, transfers, net_spend
 
     def _select_transfer_package(
         self,
@@ -749,7 +753,7 @@ class SquadPlanner:
                 "selected_probability": probability,
             }
 
-        candidates = []
+        prepared_packages = []
         limit = min(int(max_recruits), len(opportunities))
         for size in range(1, limit + 1):
             for position_subset in combinations(opportunities, size):
@@ -758,35 +762,85 @@ class SquadPlanner:
                     for opportunity in position_subset
                 ]
                 for chosen_players in product(*option_groups):
-                    forecast, transfers, net_spend = self._simulate_combined_plan(
-                        baseline,
-                        scored,
-                        list(chosen_players),
-                        context["matches"],
-                        base_adjustment=base_adjustment,
+                    modified, transfers, net_spend, transfer_adjustment = self._prepare_combined_profile(
+                        baseline, scored, list(chosen_players), context["matches"]
                     )
-                    if not transfers:
-                        continue
-                    evaluation = self.league_model.evaluate(
-                        league,
-                        forecast["goals_for"],
-                        forecast["goals_against"],
-                        target_position=int(target_position),
-                        matches=context["matches"],
-                        n_teams=context["n_teams"],
-                        next_season=context["season"],
-                    ).iloc[0]
-                    probability = self._finite(evaluation.get("estimated_target_probability"))
-                    candidates.append({
-                        "forecast": forecast,
-                        "transfers": transfers,
-                        "net_spend": float(net_spend),
-                        "probability": probability,
-                        "predicted_position": float(evaluation["predicted_position"]),
-                        "target_reached": bool(
-                            probability is not None and probability >= float(requested_probability)
-                        ),
-                    })
+                    if transfers:
+                        prepared_packages.append({
+                            "modified": modified,
+                            "transfers": transfers,
+                            "net_spend": net_spend,
+                            "transfer_adjustment": transfer_adjustment,
+                        })
+
+        candidates = []
+        if prepared_packages:
+            # Thousands of candidate combinations are cheap to build but slow if
+            # each one invokes pandas/model prediction separately. Predict every
+            # package in one batch, then evaluate all resulting GF/GA pairs together.
+            batch = pd.concat(
+                [row["modified"] for row in prepared_packages],
+                ignore_index=True,
+                sort=False,
+            )
+            predictions = self.driver_model.predict(batch, matches=int(context["matches"]))
+            base = base_adjustment or {}
+            base_for = float(base.get("goals_for", 0.0))
+            base_against = float(base.get("goals_against_reduction", 0.0))
+            transfer_for = np.asarray([
+                row["transfer_adjustment"]["goals_for"] for row in prepared_packages
+            ], dtype=float)
+            transfer_against = np.asarray([
+                row["transfer_adjustment"]["goals_against_reduction"] for row in prepared_packages
+            ], dtype=float)
+
+            goals_for = np.maximum(
+                predictions["predicted_goals_for"].to_numpy(dtype=float)
+                + base_for
+                + transfer_for,
+                0.0,
+            )
+            goals_against = np.maximum(
+                predictions["predicted_goals_against"].to_numpy(dtype=float)
+                - base_against
+                - transfer_against,
+                0.0,
+            )
+            evaluations = self.league_model.evaluate(
+                league,
+                goals_for,
+                goals_against,
+                target_position=int(target_position),
+                matches=context["matches"],
+                n_teams=context["n_teams"],
+                next_season=context["season"],
+            )
+
+            for idx, package in enumerate(prepared_packages):
+                evaluation = evaluations.iloc[idx]
+                probability = self._finite(evaluation.get("estimated_target_probability"))
+                forecast = {
+                    "goals_for": float(goals_for[idx]),
+                    "goals_against": float(goals_against[idx]),
+                    "attack_out_of_range_features": int(
+                        predictions["attack_out_of_range_features"].iloc[idx]
+                    ),
+                    "defence_out_of_range_features": int(
+                        predictions["defence_out_of_range_features"].iloc[idx]
+                    ),
+                    "attribute_finishing_adjustment": float(transfer_for[idx]),
+                    "attribute_goalkeeping_reduction": float(transfer_against[idx]),
+                }
+                candidates.append({
+                    "forecast": forecast,
+                    "transfers": package["transfers"],
+                    "net_spend": float(package["net_spend"]),
+                    "probability": probability,
+                    "predicted_position": float(evaluation["predicted_position"]),
+                    "target_reached": bool(
+                        probability is not None and probability >= float(requested_probability)
+                    ),
+                })
 
         if not candidates:
             forecast, transfers, net_spend = self._simulate_combined_plan(
