@@ -1,25 +1,37 @@
 league,season,position,team_id,matches,goals_for,goals_against,points,points_adjustment
-Example League,2023/24,1,example-2023-1,38,84,26,62,0
-Example League,2023/24,2,example-2023-2,38,76,31,58,0
-Example League,2023/24,3,example-2023-3,38,70,35,54,0
-Example League,2023/24,4,example-2023-4,38,64,40,50,0
-Example League,2023/24,5,example-2023-5,38,58,44,46,0
-Example League,2023/24,6,example-2023-6,38,52,48,42,0
-Example League,2023/24,7,example-2023-7,38,48,52,38,0
-Example League,2023/24,8,example-2023-8,38,44,56,34,0
-Example League,2023/24,9,example-2023-9,38,40,60,30,0
-Example League,2023/24,10,example-2023-10,38,36,64,26,0
-Example League,2023/24,11,example-2023-11,38,32,68,22,0
-Example League,2023/24,12,example-2023-12,38,28,108,18,0
-Example League,2024/25,1,example-2024-1,38,84,26,62,0
-Example League,2024/25,2,example-2024-2,38,77,31,58,0
-Example League,2024/25,3,example-2024-3,38,72,35,54,0
-Example League,2024/25,4,example-2024-4,38,64,40,50,0
-Example League,2024/25,5,example-2024-5,38,59,44,46,0
-Example League,2024/25,6,example-2024-6,38,54,48,42,0
-Example League,2024/25,7,example-2024-7,38,48,52,38,0
-Example League,2024/25,8,example-2024-8,38,45,56,34,0
-Example League,2024/25,9,example-2024-9,38,42,60,30,0
-Example League,2024/25,10,example-2024-10,38,36,64,26,0
-Example League,2024/25,11,example-2024-11,38,33,68,22,0
-Example League,2024/25,12,example-2024-12,38,30,120,18,0
+Example League,2023/24,1,Club A,38,84,29,72,0
+Example League,2023/24,2,Club B,38,79,34,67,0
+Example League,2023/24,3,Club C,38,74,39,62,0
+Example League,2023/24,4,Club D,38,69,44,57,0
+Example League,2023/24,5,Club E,38,64,49,52,0
+Example League,2023/24,6,Club F,38,59,54,47,0
+Example League,2023/24,7,Club G,38,54,59,42,0
+Example League,2023/24,8,Club H,38,49,64,37,0
+Example League,2023/24,9,Club I,38,44,69,32,0
+Example League,2023/24,10,Club J,38,39,74,27,0
+Example League,2023/24,11,Club K,38,34,79,22,0
+Example League,2023/24,12,Club L,38,29,84,17,0
+Example League,2024/25,1,Club A,38,85,30,72,0
+Example League,2024/25,2,Club B,38,80,35,67,0
+Example League,2024/25,3,Club C,38,75,40,62,0
+Example League,2024/25,4,Club D,38,70,45,57,0
+Example League,2024/25,5,Club E,38,65,50,52,0
+Example League,2024/25,6,Club F,38,60,55,47,0
+Example League,2024/25,7,Club G,38,55,60,42,0
+Example League,2024/25,8,Club H,38,50,65,37,0
+Example League,2024/25,9,Club I,38,45,70,32,0
+Example League,2024/25,10,Club J,38,40,75,27,0
+Example League,2024/25,11,Club K,38,35,80,22,0
+Example League,2024/25,12,Club L,38,30,85,17,0
+Example League,2025/26,1,Club A,38,86,31,72,0
+Example League,2025/26,2,Club B,38,81,36,67,0
+Example League,2025/26,3,Club C,38,76,41,62,0
+Example League,2025/26,4,Club D,38,71,46,57,0
+Example League,2025/26,5,Club E,38,66,51,52,0
+Example League,2025/26,6,Club F,38,61,56,47,0
+Example League,2025/26,7,Club G,38,56,61,42,0
+Example League,2025/26,8,Club H,38,51,66,37,0
+Example League,2025/26,9,Club I,38,46,71,32,0
+Example League,2025/26,10,Club J,38,41,76,27,0
+Example League,2025/26,11,Club K,38,36,81,22,0
+Example League,2025/26,12,Club L,38,31,86,17,0
