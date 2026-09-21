@@ -15,7 +15,7 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
-from .data import ATTRIBUTES, PLAYER_METRICS, numeric, parse_number, require
+from .data import ATTRIBUTES, FMST_NUMERIC_COLUMNS, PLAYER_METRICS, numeric, parse_number, require
 from .drivers import GoalDriverModel
 from .errors import DataError, NotFittedError
 
@@ -101,7 +101,7 @@ def _prepare_players(frame: pd.DataFrame, *, role_column="role_group", minimum_m
     require(f, ["league", "minutes"])
     # FM tables may display 2,800 minutes or £1.5m values as text. Convert only
     # fields known to be numeric; identity/role columns stay untouched.
-    numeric_labels = set(PLAYER_METRICS) | set(ATTRIBUTES) | set(RAW_COUNT_METRICS) | {
+    numeric_labels = set(FMST_NUMERIC_COLUMNS) | set(PLAYER_METRICS) | set(ATTRIBUTES) | set(RAW_COUNT_METRICS) | {
         "minutes", "age", *PRICE_COLUMNS, *WAGE_COLUMNS, "contract_months", "reputation", "expected_minutes"
     }
     for col in numeric_labels.intersection(f.columns):
@@ -523,6 +523,8 @@ class PlayerValuationModel:
         scored["decision_reason"] = reasons
         scored["decision_confidence"] = np.where(
             (scored.minutes >= self.minimum_minutes) & np.isfinite(scored.market_price) & np.isfinite(expected), "higher", "lower")
+        if self.drivers is None:
+            scored["decision_confidence"] = "descriptive_proxy"
         return scored
 
     def _above_replacement(self, scored):

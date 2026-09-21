@@ -14,25 +14,17 @@ Dependencies are installed from `requirements.txt`.
 
 ## App workflow
 
-The primary path is now the **Complete squad plan**:
+The standard path uses **Season target** and **Recruitment**:
 
 1. Upload several completed league-table seasons.
-2. Upload matching team-performance history for every club.
-3. Optionally upload several historical player-season exports. These train the attribute → player-outcome layer with the latest historical season held out for validation.
-4. Upload the current squad plus the broadest realistic transfer-market pool.
-5. Fit the model and choose club, formation, target position, evidence threshold and maximum signings.
-6. `MoneyballModel.squad_plan()` returns:
-   - required GF/GA;
-   - current next-season GF/GA forecast from the latest team-process profile;
-   - attack/defence gap;
-   - players to consider selling;
-   - position upgrade opportunities;
-   - minimum stat/attribute screening profiles;
-   - current-market shortlists;
-   - a value-aware transfer package;
-   - combined post-transfer GF/GA, predicted position and target probability.
+2. Upload the current squad and market statistics for one recent season.
+3. Set the player statistics season start year and club. No team metrics are required.
+4. Build available layers and inspect input diagnostics.
+5. Use league GF/GA targets and descriptive player/price comparisons.
 
-The separate Season target, Goal drivers, Recruitment and Diagnostics tabs remain available for inspection.
+Additional player files and team history live under Optional additional data. Without a team-goal model, the complete squad forecast remains unavailable and the UI explains why. It never manufactures team metrics by summing player statistics or invents another season from duplicate uploads.
+
+A bad league table is reported with its actual GF/GA totals. The app can still load player comparisons, while the invalid league layer stays unavailable. Library callers remain strict by default; only the UI explicitly opts into `build_model(..., allow_partial=True)`.
 
 ## Upload handling
 
@@ -44,7 +36,7 @@ team_2024_25.csv
 players_2024_25.csv
 ```
 
-Current player exports can omit league/season when that context is supplied in the sidebar. Ownership can come from an `owned` column or be inferred from the user's club.
+Both player uploads can omit league/season when that context is supplied in the sidebar. A filename such as `player_history.csv` does not mean it contains multiple seasons. Ownership can come from an `owned` column or be inferred from the user's club.
 
 Displayed money ranges are never silently averaged. The user explicitly chooses lower, midpoint, upper or error handling.
 

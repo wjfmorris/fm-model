@@ -27,6 +27,10 @@ def canonical_role(value) -> str:
     """Map common FM/FΜST position labels into stable planning groups."""
 
     text = str(value or "").upper().strip()
+    # Parenthesised side combinations belong to their own position token.
+    # Expand D (RC), M (LC), etc. without confusing them with unrelated roles.
+    text = re.sub(r"\b(D|M|WB|AM)\s*\(([RLC]+)\)",
+                  lambda m: m.group(1) + " " + " ".join(m.group(2)), text)
     compact = re.sub(r"[^A-Z0-9]+", " ", text)
     tokens = set(compact.split())
 
@@ -46,6 +50,8 @@ def canonical_role(value) -> str:
         return "CB"
     if "DM" in tokens or tokens.intersection({"MC", "CM", "DMC"}) or ("M" in tokens and "C" in tokens) or "CENTRAL MID" in compact or "DEFENSIVE MID" in compact:
         return "CM_DM"
+    if "M" in tokens and tokens.intersection({"L", "R"}):
+        return "AM_W"
     if "D" in tokens and tokens.intersection({"L", "R"}):
         return "FB_WB"
     return "OTHER"

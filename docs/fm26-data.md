@@ -1,3 +1,7 @@
+# Standard latest-season uploads
+
+Use multi-season league tables and one recent-season player statistics export. Team metrics are optional, not required. See [the current FMST26 upload contract](fmst26-uploads.md) for exact heading and unit handling and the limits of player-only comparisons. The collection options below describe additional data for research models.
+
 # FM26 data collection checklist
 
 The backend accepts ordinary exports and does not depend on a particular extraction tool. Because FM26 may not provide a native statistics export in every edition/platform, collect the maximum information available from the save and preserve the source view name and season in each file.

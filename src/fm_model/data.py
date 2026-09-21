@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from .errors import DataError
+from .roles import canonical_role
 
 
 ALIASES = {
@@ -40,6 +41,38 @@ ALIASES = {
     "tck": "tackling", "mar": "marking", "pos_attr": "positioning", "ant": "anticipation",
     "ref": "reflexes", "han": "handling", "one": "one_on_ones", "aer": "aerial_reach",
 }
+
+# Exact FMST26 display headings. Percentages stay on the displayed 0..100 scale.
+# Keep ambiguous event labels distinct (CCC, tackles and pressures) rather than
+# silently treating them as a different statistic.
+FMST_STAT_COLUMNS = {
+    "goals_per_90": "goals_p90", "xg_per_90": "xg_p90",
+    "xa_per_90": "xa_p90", "np_xg_per_90": "non_penalty_xg_p90",
+    "xg_overperformance": "xg_overperformance", "shots_per_90": "shots_p90",
+    "shots_on_target_per_90": "shots_on_target_p90", "shot_accuracy_%": "shot_accuracy_pct",
+    "ccc_per_90": "clear_cut_chances_p90", "shots_outside_box_per_90": "shots_outside_box_p90",
+    "pass_completion_%": "pass_completion_pct", "passes_completed_per_90": "passes_completed_p90",
+    "passes_attempted_per_90": "passes_attempted_p90", "key_passes_per_90": "key_passes_p90",
+    "progressive_passes_per_90": "progressive_passes_p90", "crosses_attempted": "crosses_attempted",
+    "crosses_completed": "crosses_completed", "cross_completion_%": "cross_completion_pct",
+    "open_play_crosses_att": "open_play_crosses_attempted",
+    "open_play_crosses_comp": "open_play_crosses_completed", "open_play_cross_%": "open_play_cross_pct",
+    "open_play_key_passes_p90": "open_play_key_passes_p90", "tackles_per_90": "tackles_p90",
+    "tackles_attempted": "tackles_attempted", "tackle_success_%": "tackle_success_pct",
+    "interceptions_per_90": "interceptions_p90", "clearances_per_90": "clearances_p90",
+    "blocks_per_90": "blocks_p90", "key_tackles_per_90": "key_tackles_p90",
+    "pressures_per_90": "pressures_p90", "pressures_attempted_per_90": "pressures_attempted_p90",
+    "pressure_success_%": "pressure_success_pct", "fouls_made": "fouls_made",
+    "possession_won_per_90": "possession_won_p90", "possession_lost_per_90": "possession_lost_p90",
+    "shots_blocked_per_90": "shots_blocked_p90", "mistakes_leading_to_goals": "errors_leading_to_goal",
+    "dribbles_per_90": "dribbles_p90", "headers_attempted": "headers_attempted",
+    "headers_won": "headers_won", "header_win_%": "header_win_pct",
+    "save_percentage": "save_pct", "saves_per_90": "saves_p90", "clean_sheets": "clean_sheets",
+    "goals_conceded_per_90": "goals_conceded_p90", "xg_prevented": "xg_prevented",
+    "penalty_save_%": "penalty_save_pct",
+}
+ALIASES.update(FMST_STAT_COLUMNS)
+FMST_NUMERIC_COLUMNS = frozenset(FMST_STAT_COLUMNS.values())
 
 ATTRIBUTES = (
     "corners", "crossing", "dribbling", "finishing", "first_touch", "free_kick_taking",
@@ -188,7 +221,7 @@ def prepare_player_export(frame: pd.DataFrame, *, league=None, season=None, owne
     if owned is not None and "owned" not in f:
         f["owned"] = owned
     if "role_group" not in f and "position" in f:
-        f["role_group"] = f["position"]
+        f["role_group"] = f["position"].map(canonical_role)
     return f
 
 
@@ -236,7 +269,8 @@ def validate_league_table(frame: pd.DataFrame) -> pd.DataFrame:
         if g.matches.nunique() != 1:
             raise DataError(f"{key}: unequal matches; use one completed, comparable league phase.")
         if int(g.goals_for.sum()) != int(g.goals_against.sum()):
-            raise DataError(f"{key}: total goals for must equal total goals against.")
+            raise DataError(f"{key}: total goals for ({int(g.goals_for.sum())}) must equal "
+                            f"total goals against ({int(g.goals_against.sum())}). Check the source table.")
         if g.goals_for.sum() <= 0:
             raise DataError(f"{key}: no goals; cannot learn a scoring environment.")
         if "team_id" in g and g.team_id.duplicated().any():

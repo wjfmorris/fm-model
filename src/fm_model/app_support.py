@@ -13,7 +13,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from .data import ATTRIBUTES, PLAYER_METRICS, parse_number, prepare_player_export, read_table
+from .data import (
+    ATTRIBUTES, FMST_NUMERIC_COLUMNS, PLAYER_METRICS,
+    season_number, parse_number, prepare_player_export, read_table,
+)
 from .errors import DataError
 from .pipeline import MoneyballModel
 from .players import PRICE_COLUMNS, RAW_COUNT_METRICS, WAGE_COLUMNS
@@ -21,6 +24,7 @@ from .players import PRICE_COLUMNS, RAW_COUNT_METRICS, WAGE_COLUMNS
 
 PLAYER_NUMERIC_COLUMNS = (
     set(ATTRIBUTES)
+    | set(FMST_NUMERIC_COLUMNS)
     | set(PLAYER_METRICS)
     | set(RAW_COUNT_METRICS)
     | set(PRICE_COLUMNS)
@@ -127,8 +131,8 @@ def read_player_for_app(
     return frame
 
 
-def read_player_history_for_app(sources, *, league=None, range_policy="error"):
-    """Merge historical player-season exports and preserve season labels."""
+def read_player_history_for_app(sources, *, league=None, season=None, range_policy="error"):
+    """Read the latest player season by default; explicit years remain authoritative."""
 
     if not sources:
         return None
@@ -136,34 +140,46 @@ def read_player_history_for_app(sources, *, league=None, range_policy="error"):
     frames = []
     for source in sources:
         frame = read_table(clone_upload(source))
-        season = None
+        file_season = None
         if "season" not in frame:
-            season = infer_season_from_name(getattr(source, "name", ""))
-            if season is None:
+            file_season = infer_season_from_name(getattr(source, "name", ""))
+            if file_season is None:
+                file_season = season
+            if file_season is None:
                 raise DataError(
                     f"{getattr(source, 'name', 'player history')}: no season column. "
-                    "Add season or rename the file like players_2025_26.csv."
+                    "Select the player season, add season, or name the file players_2025_26.csv."
                 )
-        frame = prepare_player_export(frame, league=league, season=season)
+        frame = prepare_player_export(frame, league=league, season=file_season)
+        frame["season"] = frame["season"].map(season_number)
         for col in PLAYER_NUMERIC_COLUMNS.intersection(frame.columns):
             frame[col] = frame[col].map(lambda value: parse_number(value, ranges=range_policy))
         frames.append(frame)
-    return pd.concat(frames, ignore_index=True, sort=False)
+    return pd.concat(frames, ignore_index=True, sort=False).drop_duplicates().reset_index(drop=True)
 
 
-def build_model(*, league_data=None, team_data=None, historical_player_data=None, player_data=None, include_all_available=False):
+def build_model(*, league_data=None, team_data=None, historical_player_data=None, player_data=None, include_all_available=False, allow_partial=False):
     """Fit every supplied model layer in dependency order."""
 
     if league_data is None and team_data is None and historical_player_data is None and player_data is None:
         raise DataError("Provide at least one data source before building the model.")
 
     model = MoneyballModel()
+    model.upload_issues = []
     if league_data is not None:
-        model.fit_league(league_data)
+        try:
+            model.fit_league(league_data)
+        except DataError as exc:
+            if not allow_partial:
+                raise
+            model.league_model = None
+            model.upload_issues.append("League targets unavailable: " + str(exc))
     if team_data is not None:
         model.fit_drivers(team_data, include_all_available=include_all_available)
     if historical_player_data is not None:
         model.fit_player_outcomes(historical_player_data)
+    if player_data is None and historical_player_data is not None:
+        player_data = historical_player_data
     if player_data is not None:
         model.fit_players(player_data)
     return model
@@ -191,3 +207,29 @@ def serialise_model(model):
 
 def frame_to_csv_bytes(frame: pd.DataFrame):
     return frame.to_csv(index=False).encode("utf-8")
+
+
+def player_upload_report(frame):
+    """Display import coverage and suspicious source values without changing them."""
+    warnings = []
+    if not any(c in frame for c in ATTRIBUTES):
+        warnings.append("No player attributes were exported. Attribute learning is unavailable; statistics remain usable.")
+    if "season" in frame and frame.season.nunique() == 1:
+        warnings.append("One player season supplied. Comparisons describe this season; future-season validation is unavailable.")
+    for completed, attempted in (("crosses_completed", "crosses_attempted"),
+                                 ("open_play_crosses_completed", "open_play_crosses_attempted"),
+                                 ("headers_won", "headers_attempted")):
+        if completed in frame and attempted in frame:
+            n = int((frame[completed] > frame[attempted]).sum())
+            if n:
+                warnings.append(f"{n} rows have {completed} greater than {attempted}; check the export. Values were retained.")
+    if "market_value" in frame:
+        counts = frame.market_value.dropna().value_counts()
+        if len(counts) and counts.iloc[0] >= max(5, len(frame) * 0.03):
+            warnings.append(f"{int(counts.iloc[0])} players share guide value {counts.index[0]:,.0f}. Check repeated/capped values before acting on prices.")
+    if not any(c in frame for c in WAGE_COLUMNS):
+        warnings.append("No wages supplied. Price comparisons exclude wage and contract costs.")
+    identity = {"player_name", "player_id", "position", "role_group", "team_id", "league", "season", "owned"}
+    retained = [c for c in frame if c not in PLAYER_NUMERIC_COLUMNS and c not in identity]
+    return {"rows": len(frame), "numeric_columns": sorted(set(frame) & PLAYER_NUMERIC_COLUMNS),
+            "other_columns": retained, "warnings": warnings}

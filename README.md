@@ -1,21 +1,20 @@
 # FM Model
 
-A data-driven Football Manager 26 Moneyball planner. It connects a finishing-position target to required GF/GA, forecasts the current squad, identifies expensive/replaceable players, learns player outcomes from historical attributes, recommends position-specific recruit profiles and targets, and re-forecasts the team after the proposed transfers.
+A Football Manager 26 tool for league goal targets and player/price comparisons, with optional research models for team goal drivers and squad planning.
 
 ## What the model does
 
-The primary workflow is:
+The standard upload workflow is:
 
-1. collect completed league tables for several seasons and learn the GF/GA combinations associated with a requested finish;
-2. collect every club's historical team metrics and learn which processes predict goals for and goals against;
-3. optionally collect historical player-season exports with **all available attributes and broad performance statistics**, so the last season can be held out while the model learns attribute → player-outcome relationships;
-4. upload the current squad plus the broadest realistic transfer market, including positions, minutes, statistics, attributes, prices, wages and contracts;
-5. choose your club, formation, target position and evidence threshold;
-6. forecast the current team's next-season GF/GA from its latest underlying team-process profile, adjusted from the previous XI to the current modelled XI when historical player seasons are available;
-7. calculate the attack/defence gap to the target;
-8. identify owned players whose market price looks high relative to contribution and replaceability;
-9. simulate player-for-player upgrades by position, using observed statistics plus historical attribute predictions where the evidence supports them;
-10. return minimum screening profiles, actual candidate shortlists, a value-aware transfer package and the combined after-transfer GF/GA/finishing-position forecast.
+1. Upload completed league tables covering several seasons.
+2. Upload one FMST26 player file covering the most recent season. Select its season start year and your club in the sidebar.
+3. Build the available layers, review import diagnostics, and use **Season target** and **Recruitment**.
+
+A separate team-metrics file is **not required**. `player_history.csv` is optional and may cover the same recent season. Its missing season uses the sidebar setting; explicit season columns or dated filenames take priority. Repeating the same player observations never creates another historical season.
+
+With these inputs, league targets and descriptive player/price comparisons work independently. The existing player comparison uses statistical proxies when no team-goal model exists. It does **not** establish which stats cause goals, forecast goals added by signings, or learn attribute effects from a statistics-only export. BUY/SELL labels in this mode are review candidates with `descriptive_proxy` confidence. See [FMST26 upload contract](docs/fmst26-uploads.md).
+
+The optional research workflow retains team goal-driver models and complete squad planning for datasets that support them. These features require team outcomes/process data; validated attribute models also require attributes and multiple player seasons. They remain unavailable when that evidence is absent.
 
 The app deliberately keeps **CA, PA, reputation and price out of the football-performance models**. Price/wage information is only used after football contribution has been estimated, so the model can search for market inefficiencies instead of reproducing FM's hidden ability ratings.
 

@@ -25,6 +25,7 @@ class MoneyballModel:
 
     def __init__(self, *, seed=26):
         self.seed = seed
+        self.upload_issues = []
         self.league_model = None
         self.driver_model = None
         self.player_model = None
@@ -63,7 +64,6 @@ class MoneyballModel:
                 self.league_model is not None and self.driver_model is not None and self.player_model is not None
             ),
             "next_step": ("Upload completed league tables" if self.league_model is None else
-                           "Upload team metrics" if self.driver_model is None else
                            "Upload player export" if self.player_model is None else "Run a target scenario"),
         }
 
@@ -133,7 +133,7 @@ class MoneyballModel:
         ).available_clubs(league)
 
     def to_dict(self):
-        return {"seed": self.seed,
+        return {"seed": self.seed, "upload_issues": self.upload_issues,
                 "league_model": None if self.league_model is None else self.league_model.to_dict(),
                 "driver_model": None if self.driver_model is None else self.driver_model.to_dict(),
                 "player_model": None if self.player_model is None else self.player_model.to_dict(),
@@ -150,6 +150,7 @@ class MoneyballModel:
     @classmethod
     def from_dict(cls, state):
         obj = cls(seed=state.get("seed", 26))
+        obj.upload_issues = state.get("upload_issues", [])
         if state.get("league_model") is not None:
             obj.league_model = LeagueModel.from_dict(state["league_model"])
         if state.get("driver_model") is not None:

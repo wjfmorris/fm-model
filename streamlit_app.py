@@ -11,7 +11,6 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from fm_model import DATA_CATALOGUE, DataError, FORMATION_PRESETS, ROLE_LABELS, MoneyballModel, read_table
-from fm_model.collection import collection_plan
 from fm_model.app_support import (
     OWNERSHIP_MODES,
     build_model,
@@ -20,6 +19,7 @@ from fm_model.app_support import (
     load_example_frames,
     merge_table_uploads,
     read_player_for_app,
+    player_upload_report,
     read_player_history_for_app,
     serialise_model,
 )
@@ -133,6 +133,7 @@ def _build_from_sidebar(
     historical_player_frame = read_player_history_for_app(
         historical_player_uploads,
         league=league_context,
+        season=int(player_season),
         range_policy=range_policy,
     ) if historical_player_uploads else None
     player_frame = None
@@ -146,12 +147,27 @@ def _build_from_sidebar(
             range_policy=range_policy,
         )
 
+    # A single latest-season export is enough for the player comparison workflow.
+    if player_frame is None and historical_player_frame is not None:
+        player_frame = historical_player_frame.copy()
+        if ownership_mode == "all":
+            player_frame["owned"] = True
+        elif ownership_mode == "none":
+            player_frame["owned"] = False
+        elif ownership_mode == "column" and "owned" not in player_frame:
+            raise DataError("Ownership mode requires an owned column.")
+        elif ownership_mode == "club" or "owned" not in player_frame:
+            if ownership_mode == "club" and not owned_club.strip():
+                raise DataError("Enter your club name when ownership is inferred from club.")
+            player_frame["owned"] = player_frame.get("team_id", pd.Series("", index=player_frame.index)).astype(str).str.strip().str.casefold().eq(owned_club.strip().casefold())
+
     model = build_model(
         league_data=league_frame,
         team_data=team_frame,
         historical_player_data=historical_player_frame,
         player_data=player_frame,
         include_all_available=include_all_available,
+        allow_partial=True,
     )
     _store_model(
         model,
@@ -223,22 +239,27 @@ def render_sidebar():
             accept_multiple_files=True,
             help="Upload several completed seasons at once. Each file needs a season column, or a filename such as league_2025_26.csv.",
         )
-        team_upload = st.file_uploader(
-            "Team performance history",
-            type=["csv", "tsv", "html", "htm", "xlsx", "xlsm"],
-            key="team_upload",
-            accept_multiple_files=True,
-            help="Upload all clubs for several seasons: xG, shots, chance creation, pressing, defensive and goalkeeping metrics.",
-        )
-        historical_player_upload = st.file_uploader(
-            "Historical player-season exports",
-            type=["csv", "tsv", "html", "htm", "xlsx", "xlsm"],
-            key="historical_player_upload",
-            accept_multiple_files=True,
-            help="All players, all clubs, several completed seasons. This is what lets the model learn which attributes predict player outcomes.",
-        )
+        # Extra research inputs are optional; the standard workflow needs no team file.
+        with st.expander("Optional additional data", expanded=False):
+            historical_player_upload = st.file_uploader(
+                "Additional player statistics (optional)",
+                type=["csv", "tsv", "html", "htm", "xlsx", "xlsm"],
+                key="historical_player_upload",
+                accept_multiple_files=True,
+                help="player_history.csv can contain the same latest season. Missing years use the selected player season. Only genuinely different seasons support temporal validation.",
+            )
+            team_upload = st.file_uploader(
+                "Team history (optional research input)",
+                type=["csv", "tsv", "html", "htm", "xlsx", "xlsm"],
+                key="team_upload",
+                accept_multiple_files=True,
+                help="Not required for league targets or player comparisons. Leave empty when unavailable.",
+            )
+            include_all_available = st.checkbox(
+                "Test all numeric team metrics", value=False, key="include_all_available",
+            )
         player_upload = st.file_uploader(
-            "Player pool / FMST26 export",
+            "Latest-season player export",
             type=["csv", "tsv", "html", "htm", "xlsx", "xlsm"],
             key="player_upload",
             help="The broadest relevant player pool is best; include price, minutes and role/position.",
@@ -251,12 +272,13 @@ def render_sidebar():
                 help="Leave blank when the export already includes league, or when your uploaded league history has exactly one league.",
             )
             player_season = st.number_input(
-                "Save season",
+                "Player statistics season (start year)",
                 min_value=1900,
                 max_value=2200,
-                value=2026,
+                value=2025,
                 step=1,
                 key="player_season_context",
+                help="For statistics from 2025/26 enter 2025. This applies to both player files when they omit a season. Use the season the statistics cover, not the next season.",
             )
             ownership_label = st.selectbox(
                 "Ownership handling",
@@ -278,13 +300,6 @@ def render_sidebar():
                 key="range_policy",
                 help="The model never silently averages a displayed range. Choose how ranges should be resolved, or leave error to force explicit cleanup.",
             )
-
-        include_all_available = st.checkbox(
-            "Let the goal-driver model test all numeric team metrics",
-            value=False,
-            key="include_all_available",
-            help="Protected outcome fields are still excluded. Leave this off for the most interpretable model.",
-        )
 
         has_upload = bool(league_upload or team_upload or historical_player_upload or player_upload)
         if st.button(
@@ -308,7 +323,7 @@ def render_sidebar():
                         range_policy=range_policy,
                         include_all_available=include_all_available,
                     )
-                st.success("Model built.")
+                st.success("Available model layers built. Check the upload diagnostics below.")
             except (DataError, ValueError) as exc:
                 st.error(str(exc))
 
@@ -330,7 +345,7 @@ def render_header():
     st.title("FM26 Moneyball Recruitment Lab")
     st.write(
         "Use your save's own data to estimate the goal profile associated with a target finish, "
-        "learn which team processes predict those goals, and identify players whose market price "
+        "compare player statistics, and identify players whose market price "
         "looks different from their role-relative contribution."
     )
     st.caption(
@@ -355,76 +370,11 @@ def render_header():
 
 
 def render_collection_wizard():
-    st.subheader("Data Collection Wizard")
-    st.write(
-        "Use this before exporting anything. The model is designed to collect broadly, then learn what matters "
-        "instead of asking you to guess which attributes or statistics are important."
-    )
-    seasons = st.number_input(
-        "Historical seasons to collect",
-        min_value=2,
-        max_value=10,
-        value=3,
-        step=1,
-        key="collection_seasons",
-    )
-    plan = collection_plan(historical_seasons=int(seasons))
-
-    st.info(
-        "**Club scope:** historical league tables, team metrics and player history should cover **every club in the league**, "
-        "not just your club or the strongest sides. The current-market file should contain your full squad plus the broadest "
-        "set of players you could realistically sign."
-    )
-
-    section_labels = {
-        "league_tables": "1. League tables",
-        "team_history": "2. Team performance history",
-        "historical_players": "3. Historical player seasons",
-        "current_market": "4. Current squad + transfer market",
-    }
-    manifest_rows = []
-    for key, title in section_labels.items():
-        item = plan[key]
-        with st.expander(title, expanded=(key == "historical_players")):
-            st.write(f"**Seasons:** {item['seasons']}")
-            st.write(f"**Clubs:** {item['clubs']}")
-            if isinstance(item.get("positions"), dict):
-                position_table = pd.DataFrame(
-                    [{"Position group": code, "Include": scope} for code, scope in item["positions"].items()]
-                )
-                st.dataframe(position_table, width="stretch", hide_index=True)
-            elif item.get("positions"):
-                st.write(f"**Positions:** {item['positions']}")
-            st.write(f"**Why:** {item['purpose']}")
-
-            field_groups = [
-                ("Required / identity", item.get("required_fields") or item.get("identity_fields") or item.get("fields", [])),
-                ("Attacking", item.get("attacking_fields", [])),
-                ("Defensive", item.get("defensive_fields", [])),
-                ("Performance", item.get("performance_fields", [])),
-                ("Attributes", item.get("attribute_fields", [])),
-                ("Market", item.get("market_fields", [])),
-            ]
-            for group_name, fields in field_groups:
-                if not fields:
-                    continue
-                st.markdown(f"**{group_name} columns**")
-                st.code(", ".join(fields), language=None)
-                for field in fields:
-                    manifest_rows.append({"File": title, "Group": group_name, "Column": field})
-
-    st.warning(
-        "**Do not feed CA, PA, price, wages or reputation into the football-performance models.** "
-        "They are kept separate for valuation/validation so the model has to discover performance value from observable football data."
-    )
-    manifest = pd.DataFrame(manifest_rows).drop_duplicates()
-    st.download_button(
-        "Download complete export-column checklist",
-        frame_to_csv_bytes(manifest),
-        "fm26_data_collection_checklist.csv",
-        "text/csv",
-        key="download_collection_manifest",
-    )
+    st.subheader("Standard upload workflow")
+    st.write("Upload completed league tables for several seasons and one FMST26 player export covering the most recent season. A separate team-metrics file is not required.")
+    st.write("player_history.csv is optional. If it repeats player_export.csv, it adds no historical evidence. Both use the player season selected in the sidebar unless their own season is supplied.")
+    st.write("Select your league, the start year of the statistics season, and your club. Original FMST26 headings, per-90 values, percentages, currency values and blank cells are supported.")
+    st.caption("For league targets, complete tables must balance total goals for and against. For player comparisons, export the full squad and market pool. Attributes and wages can be added when available.")
 
 
 def render_setup():
@@ -440,22 +390,24 @@ def render_setup():
         st.markdown(
             """
 1. Export several completed league tables.
-2. Export the matching team-performance history.
-3. Export the broad player pool from FMST26, including minutes, role/position, value and wages where available.
-4. Build the model in the sidebar.
-5. Set a finishing target, inspect the learned drivers, then use Recruitment to search the market.
+2. Export one recent season of player statistics from FMST26.
+3. Select the statistics season and your club in the sidebar.
+4. Build the model and review import diagnostics.
+5. Use Season target and Recruitment; no team-metrics upload is needed.
             """
         )
     with right:
         st.subheader("Minimum useful evidence")
         st.write("**League target:** at least two completed seasons.")
-        st.write("**Goal drivers:** at least 24 team observations across at least two seasons.")
+        st.write("**Without team metrics:** league targets and descriptive player/price comparisons are available. Learned team goal drivers and transfer goal forecasts are unavailable.")
         st.write("**Recruitment:** broad role groups with meaningful minutes and market prices.")
-        st.write("**Best version:** historical player seasons linked to team seasons.")
+        st.write("**Attributes:** no attribute conclusions are shown when the export contains statistics only. One season does not provide future-season validation.")
 
     if model is None:
         st.warning("No model is loaded yet.")
     else:
+        for issue in model.upload_issues:
+            st.error(issue)
         readiness = model.readiness()
         ready_table = pd.DataFrame(
             [
@@ -483,6 +435,16 @@ def render_setup():
             continue
         with st.expander(f"{label}: {len(frame):,} rows · {len(frame.columns)} columns"):
             st.dataframe(frame.head(50), width="stretch", hide_index=True)
+            if key in {"players", "player_history"}:
+                report = player_upload_report(frame)
+                st.caption(f"Recognised numeric fields: {len(report['numeric_columns'])}")
+                for warning in report["warnings"]:
+                    st.warning(warning)
+    if frames.get("players") is not None and frames.get("player_history") is not None:
+        current = frames["players"].drop(columns=["owned"], errors="ignore").reset_index(drop=True)
+        history = frames["player_history"].drop(columns=["owned"], errors="ignore").reset_index(drop=True)
+        if current.equals(history):
+            st.info("The two player uploads contain the same observations. They represent one season and are not counted as additional history.")
 
     st.subheader("Example templates")
     try:
@@ -713,7 +675,7 @@ def render_drivers():
     st.header("Goal drivers")
     model = _current_model()
     if model is None or model.driver_model is None:
-        st.info("Upload team performance history to learn attacking and defensive goal drivers.")
+        st.info("Goal-driver learning is unavailable with player-only exports. League targets and descriptive recruitment comparisons remain available.")
         return
 
     st.dataframe(_driver_validation_table(model), width="stretch", hide_index=True)
@@ -912,6 +874,9 @@ def _filter_recruitment(frame):
 
 def render_recruitment():
     st.header("Recruitment")
+    current_model = _current_model()
+    if current_model is not None and current_model.driver_model is None:
+        st.info("These are descriptive player/price comparisons using preset statistical proxies. They do not identify the most impactful goal drivers or predict goals added by a signing. Treat BUY/SELL labels as review candidates.")
     model = _current_model()
     if model is None or model.player_model is None:
         st.info("Upload a player pool to build role-relative contribution and market comparisons.")
@@ -1100,8 +1065,8 @@ def render_squad_plan():
     players = frames.get("players")
     if model is None or not model.readiness().get("squad_plan") or players is None:
         st.info(
-            "Build all three core layers first: completed league tables, historical team metrics and the current player pool. "
-            "Historical player seasons are optional but make the attribute recommendations much stronger."
+            "With the standard uploads, use Season target for GF/GA targets and Recruitment for player/price comparisons. "
+            "A complete transfer goal forecast is unavailable without a validated team-goal model; player totals alone do not establish the effect of a signing."
         )
         return
 
