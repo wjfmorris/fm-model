@@ -95,7 +95,7 @@ def intended_position_role(value: str) -> str:
 
 
 def exact_positions(value) -> list[str]:
-    """Extract exact FM positions from labels such as M (L), AM (RL), ST."""
+    """Extract exact FM positions while preserving FM's displayed order."""
 
     text = str(value or "").upper().strip()
     if not text:
@@ -107,27 +107,8 @@ def exact_positions(value) -> list[str]:
         if position in INTENDED_POSITION_TO_ROLE and position not in result:
             result.append(position)
 
-    if re.search(r"(^|[^A-Z])GK([^A-Z]|$)", text):
-        add("GK")
-
-    # FM may write D/WB (L), M/AM (RL), D (LC), AM (RLC), etc.
-    for match in re.finditer(r"((?:D|WB|M|AM)(?:/(?:D|WB|M|AM))*)\s*\(([RLC]+)\)", text):
-        families = match.group(1).split("/")
-        sides = match.group(2)
-        for family in families:
-            for side in sides:
-                if family == "D":
-                    add("DC" if side == "C" else f"D{side}")
-                elif family == "WB" and side in {"L", "R"}:
-                    add(f"WB{side}")
-                elif family == "M":
-                    add("MC" if side == "C" else f"M{side}")
-                elif family == "AM":
-                    add(f"AM{side}")
-
-    compact = re.sub(r"[^A-Z0-9]+", " ", text)
-    tokens = compact.split()
     aliases = {
+        "GK": "GK",
         "DC": "DC", "CB": "DC",
         "DL": "DL", "LB": "DL",
         "DR": "DR", "RB": "DR",
@@ -138,12 +119,39 @@ def exact_positions(value) -> list[str]:
         "AML": "AML", "AMC": "AMC", "AMR": "AMR",
         "ST": "ST", "CF": "ST",
     }
-    for token in tokens:
-        if token in aliases:
-            add(aliases[token])
 
-    if re.search(r"(^|[^A-Z])ST(?:\s*\(C\))?([^A-Z]|$)", text):
-        add("ST")
+    # Work left-to-right so "DM, M (C)" suggests DM before MC and a
+    # multifunctional FM label retains the order the game presents.
+    for segment in re.split(r"\s*,\s*", text):
+        matched_ranges = []
+        for match in re.finditer(r"((?:D|WB|M|AM)(?:/(?:D|WB|M|AM))*)\s*\(([RLC]+)\)", segment):
+            matched_ranges.append(match.span())
+            families = match.group(1).split("/")
+            sides = match.group(2)
+            for family in families:
+                for side in sides:
+                    if family == "D":
+                        add("DC" if side == "C" else f"D{side}")
+                    elif family == "WB" and side in {"L", "R"}:
+                        add(f"WB{side}")
+                    elif family == "M":
+                        add("MC" if side == "C" else f"M{side}")
+                    elif family == "AM":
+                        add(f"AM{side}")
+
+        # Remove the parenthesised expressions already expanded, then parse
+        # any bare canonical labels in the same segment.
+        remainder = segment
+        for left, right in reversed(matched_ranges):
+            remainder = remainder[:left] + " " + remainder[right:]
+        compact = re.sub(r"[^A-Z0-9]+", " ", remainder)
+        for token in compact.split():
+            if token in aliases:
+                add(aliases[token])
+
+        # ST (C) is not part of the D/M/AM family parser.
+        if re.search(r"(^|[^A-Z])ST(?:\s*\(C\))?([^A-Z]|$)", segment):
+            add("ST")
 
     return result
 
