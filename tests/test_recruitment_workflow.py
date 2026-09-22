@@ -13,6 +13,9 @@ from fm_model.recruitment import (
     assess_squad, clean_statistics, compare_targets, cost_comparison,
     default_assignments, empty_costs, identify, merge_costs, prepare_inputs, replacement_cost,
 )
+from fm_model.metric_learning import (
+    available_metrics, learn_metric_importance, metric_inventory, select_learned_metrics,
+)
 
 
 def export():
@@ -56,7 +59,11 @@ class RecruitmentTests(unittest.TestCase):
             clean, issues = clean_statistics(raw, league_matches='34')
             squad = raw[raw.team_id.eq('My Club')]
             pool, squad, _ = prepare_inputs(raw, squad)
-            _, profiles, _ = assess_squad(pool, squad, default_assignments(squad))
+            ranking = learn_metric_importance(pool)
+            selected = select_learned_metrics(pool, ranking, max_metrics=3)
+            _, profiles, _ = assess_squad(
+                pool, squad, default_assignments(squad), metrics=selected, metric_evidence=ranking
+            )
         self.assertEqual(clean.appearances.iloc[0], 51.)
         self.assertTrue(np.isnan(clean.appearances.iloc[1]))
         self.assertTrue(pd.api.types.is_float_dtype(clean.appearances))
@@ -83,7 +90,7 @@ class RecruitmentTests(unittest.TestCase):
         self.assertNotIn('market_value', pool)
         self.assertEqual(pool.fmst_guide_value.iloc[0], 300_000_000)
         self.assertEqual(pool.distance_km_p90.iloc[0], 10.3)
-        self.assertTrue(pool.attacking_actions_p90.isna().all())
+        self.assertTrue(pool.attacking_actions_p90.notna().all())
         self.assertTrue(pool.goals_outside_box.isna().all())
         self.assertTrue(issues.field.eq('goals_outside_box').any())
         self.assertAlmostEqual(pool.xg_prevented_p90.iloc[0], -2*90/1500)
@@ -110,36 +117,91 @@ class RecruitmentTests(unittest.TestCase):
         with self.assertRaises(DataError):
             prepare_inputs(squad, squad.assign(season=2024))
 
-    def test_profiles_and_fixed_benchmark_candidate_comparison(self):
+    def test_learned_profiles_and_fixed_benchmark_candidate_comparison(self):
         pool, squad, _ = frames()
         assignments = default_assignments(squad)
-        priorities, profile, reviews = assess_squad(pool, squad, assignments)
+        ranking = learn_metric_importance(pool)
+        selected = select_learned_metrics(pool, ranking, max_metrics=3)
+        priorities, profile, reviews = assess_squad(
+            pool, squad, assignments, metrics=selected, metric_evidence=ranking
+        )
         self.assertEqual(len(reviews), len(squad))
         self.assertEqual(len(priorities), 6)
         self.assertEqual(assignments.starter.sum(), 11)
         st_profile = profile[profile.role_group.eq('ST')]
-        self.assertAlmostEqual(st_profile.screening_target.iloc[0], .316)
+        self.assertFalse(st_profile.empty)
+        self.assertTrue(st_profile.importance_score.notna().all())
+        self.assertTrue(st_profile.learned_outcome.isin(['scoring', 'preventing goals']).all())
+
         target = pool[~pool.owned & pool.role_group.eq('ST')].copy()
         first, _ = compare_targets(target, squad, profile, 'ST', league='League A')
+        changed_metric = st_profile.metric.iloc[0]
         target.loc[target.index[0], 'league'] = 'League B'
-        target.loc[target.index[0], 'shots_p90'] = np.nan
+        target.loc[target.index[0], changed_metric] = np.nan
         second, detail = compare_targets(target, squad, profile, 'ST', league='League A')
         self.assertTrue(second.evidence.str.contains('cross-league').any())
-        self.assertEqual(second.metrics_required.unique().tolist(), [3])
+        self.assertEqual(second.metrics_required.unique().tolist(), [len(st_profile)])
         player = second[second.player_key.eq(target.player_key.iloc[0])].iloc[0]
-        self.assertEqual(player.metrics_observed, 2)
-        pd.testing.assert_frame_equal(first[first.source.eq('My squad')].reset_index(drop=True), second[second.source.eq('My squad')].reset_index(drop=True))
-        self.assertEqual(len(detail), len(second)*3)
+        self.assertEqual(player.metrics_observed, len(st_profile) - 1)
+        pd.testing.assert_frame_equal(
+            first[first.source.eq('My squad')].reset_index(drop=True),
+            second[second.source.eq('My squad')].reset_index(drop=True),
+        )
+        self.assertEqual(len(detail), len(second) * len(st_profile))
 
     def test_unsupported_metrics_and_low_minutes_not_zero_performance(self):
         pool, squad, _ = frames()
+        ranking = learn_metric_importance(pool)
+        selected = select_learned_metrics(pool, ranking, max_metrics=3)
         squad.loc[squad.role_group.eq('ST'), 'minutes'] = 30
-        _, profile, review = assess_squad(pool, squad, default_assignments(squad))
+        _, profile, review = assess_squad(
+            pool, squad, default_assignments(squad), metrics=selected, metric_evidence=ranking
+        )
         self.assertTrue(review[review.role_group.eq('ST')].review.eq('Insufficient minutes').all())
         self.assertTrue(profile[profile.role_group.eq('ST')].current_starter_median.isna().all())
         pool['shots_p90'] = 0
-        _, profile, _ = assess_squad(pool, squad, default_assignments(squad))
+        ranking = learn_metric_importance(pool)
+        selected = select_learned_metrics(pool, ranking, max_metrics=3)
+        _, profile, _ = assess_squad(
+            pool, squad, default_assignments(squad), metrics=selected, metric_evidence=ranking
+        )
         self.assertNotIn('shots_p90', profile.metric.tolist())
+
+    def test_metric_inventory_covers_full_fmst_style_export_and_excludes_only_by_reason(self):
+        pool, _, _ = frames()
+        inventory = metric_inventory(pool)
+        known = set(inventory.column)
+        for metric in (
+            'xg_p90', 'xa_p90', 'non_penalty_xg_p90', 'shots_p90',
+            'shots_on_target_p90', 'clear_cut_chances_p90', 'shots_outside_box_p90',
+            'pass_completion_pct', 'passes_completed_p90', 'passes_attempted_p90',
+            'key_passes_p90', 'progressive_passes_p90', 'cross_completion_pct',
+            'open_play_cross_pct', 'open_play_key_passes_p90', 'tackles_p90',
+            'tackle_success_pct', 'interceptions_p90', 'clearances_p90', 'blocks_p90',
+            'key_tackles_p90', 'pressures_attempted_p90', 'pressure_success_pct',
+            'possession_won_p90', 'possession_lost_p90', 'shots_blocked_p90',
+            'distance_km_p90', 'sprints_p90', 'dribbles_p90', 'header_win_pct',
+            'save_pct', 'saves_p90', 'xg_prevented_p90',
+        ):
+            if metric in pool:
+                self.assertIn(metric, known)
+        self.assertFalse(inventory.loc[inventory.column.eq('goals_p90'), 'eligible'].iloc[0])
+        self.assertFalse(inventory.loc[inventory.column.eq('attacking_actions_p90'), 'eligible'].iloc[0])
+        self.assertIn('goal', inventory.loc[inventory.column.eq('goals_p90'), 'reason'].iloc[0].lower())
+
+    def test_metric_selection_is_learned_not_position_hard_coded(self):
+        pool, _, _ = frames()
+        # Make one otherwise ordinary ST metric carry a very strong club scoring signal.
+        club_order = {name: i for i, name in enumerate(sorted(pool.team_id.unique()))}
+        st = pool.role_group.eq('ST')
+        pool.loc[st, 'distance_km_p90'] = pool.loc[st, 'team_id'].map(club_order).astype(float) + 1
+        # Team goals are the learning target; make them rise with the same club order.
+        for club, i in club_order.items():
+            idx = pool.team_id.eq(club)
+            pool.loc[idx, 'goals'] = float(i + 1)
+        ranking = learn_metric_importance(pool)
+        selected = select_learned_metrics(pool, ranking, max_metrics=1)
+        self.assertEqual(selected['ST'], ['distance_km_p90'])
 
     def test_costs_follow_identity_and_missing_remains_unknown(self):
         pool, squad, _ = frames()
