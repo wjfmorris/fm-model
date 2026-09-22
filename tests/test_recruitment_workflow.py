@@ -11,7 +11,8 @@ from fm_model.errors import DataError
 from fm_model.data import prepare_player_export, read_table
 from fm_model.recruitment import (
     apply_intended_positions, assess_squad, clean_statistics, compare_targets, cost_comparison,
-    default_assignments, empty_costs, identify, merge_costs, prepare_inputs, replacement_cost,
+    default_assignments, empty_costs, finish_target_percentile, identify, merge_costs,
+    prepare_inputs, replacement_cost,
 )
 from fm_model.metric_learning import (
     available_metrics, learn_metric_importance, metric_inventory, role_outcomes,
@@ -161,6 +162,48 @@ class RecruitmentTests(unittest.TestCase):
         assignment.loc[assignment.index[0], "intended_position"] = "AML"
         assignment = apply_intended_positions(assignment)
         self.assertEqual(assignment.role_group.iloc[0], "AM_W")
+
+    def test_finish_target_sets_recruitment_percentile(self):
+        self.assertAlmostEqual(finish_target_percentile(1, 18), 97.2222222222)
+        self.assertAlmostEqual(finish_target_percentile(6, 18), 69.4444444444)
+        self.assertAlmostEqual(finish_target_percentile(18, 18), 2.7777777778)
+        with self.assertRaises(DataError):
+            finish_target_percentile(19, 18)
+
+        pool, squad, _ = frames()
+        ranking = learn_metric_importance(pool)
+        selected = select_learned_metrics(pool, ranking, max_metrics=3)
+        _, ambitious, _ = assess_squad(
+            pool, squad, default_assignments(squad),
+            target_position=1, n_teams=10,
+            metrics=selected, metric_evidence=ranking,
+        )
+        _, modest, _ = assess_squad(
+            pool, squad, default_assignments(squad),
+            target_position=8, n_teams=10,
+            metrics=selected, metric_evidence=ranking,
+        )
+        self.assertTrue(ambitious.target_percentile.eq(95.0).all())
+        self.assertTrue(modest.target_percentile.eq(25.0).all())
+        self.assertTrue(ambitious.season_target_position.eq(1).all())
+        self.assertTrue(modest.season_target_position.eq(8).all())
+
+    def test_position_changes_are_ordered_least_to_most_important(self):
+        pool, squad, _ = frames()
+        ranking = learn_metric_importance(pool)
+        selected = select_learned_metrics(pool, ranking, max_metrics=3)
+        priorities, _, _ = assess_squad(
+            pool, squad, default_assignments(squad),
+            target_position=3, n_teams=10,
+            metrics=selected, metric_evidence=ranking,
+        )
+        self.assertEqual(priorities.change_importance_order.tolist(), list(range(1, len(priorities) + 1)))
+        sort_view = priorities[["unfilled_starter_slots", "weighted_percentile_shortfall"]].copy()
+        expected = sort_view.sort_values(
+            ["unfilled_starter_slots", "weighted_percentile_shortfall"],
+            ascending=[True, True], na_position="first",
+        ).reset_index(drop=True)
+        pd.testing.assert_frame_equal(sort_view.reset_index(drop=True), expected)
 
     def test_learned_profiles_and_fixed_benchmark_candidate_comparison(self):
         pool, squad, _ = frames()
