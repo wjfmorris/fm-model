@@ -187,22 +187,39 @@ class RecruitmentTests(unittest.TestCase):
         pool, _, _ = frames()
         inventory = metric_inventory(pool)
         known = set(inventory.column)
-        for metric in (
-            'xg_p90', 'xa_p90', 'non_penalty_xg_p90', 'shots_p90',
-            'shots_on_target_p90', 'clear_cut_chances_p90', 'shots_outside_box_p90',
+        expected = {
+            'goals', 'goals_p90', 'xg_p90', 'xa_p90', 'non_penalty_xg_p90',
+            'xg_overperformance', 'shots_p90', 'shots_on_target_p90',
+            'clear_cut_chances_p90', 'shots_outside_box_p90',
             'pass_completion_pct', 'passes_completed_p90', 'passes_attempted_p90',
-            'key_passes_p90', 'progressive_passes_p90', 'cross_completion_pct',
-            'open_play_cross_pct', 'open_play_key_passes_p90', 'tackles_p90',
-            'tackle_success_pct', 'interceptions_p90', 'clearances_p90', 'blocks_p90',
-            'key_tackles_p90', 'pressures_attempted_p90', 'pressure_success_pct',
+            'key_passes_p90', 'progressive_passes_p90',
+            'crosses_attempted', 'crosses_attempted_p90', 'cross_completion_pct',
+            'crosses_completed_p90', 'open_play_crosses_attempted',
+            'open_play_crosses_attempted_p90', 'open_play_cross_pct',
+            'open_play_crosses_completed_p90', 'open_play_key_passes_p90',
+            'tackles_p90', 'tackle_success_pct', 'interceptions_p90',
+            'clearances_p90', 'blocks_p90', 'key_tackles_p90',
+            'pressures_attempted_p90', 'pressure_success_pct',
             'possession_won_p90', 'possession_lost_p90', 'shots_blocked_p90',
             'distance_km_p90', 'sprints_p90', 'dribbles_p90', 'header_win_pct',
-            'save_pct', 'saves_p90', 'xg_prevented_p90',
-        ):
-            if metric in pool:
-                self.assertIn(metric, known)
-        self.assertFalse(inventory.loc[inventory.column.eq('goals_p90'), 'eligible'].iloc[0])
-        self.assertFalse(inventory.loc[inventory.column.eq('attacking_actions_p90'), 'eligible'].iloc[0])
+            'save_pct', 'saves_p90', 'clean_sheets_p90', 'goals_conceded_p90',
+            'xg_prevented', 'xg_prevented_p90', 'goal_contributions_p90',
+            'non_penalty_contributions_p90', 'defensive_actions_p90',
+            'attacking_actions_p90', 'creative_actions_p90',
+            'goalkeeping_actions_p90',
+        }
+        self.assertTrue(expected.issubset(known), sorted(expected - known))
+        eligibility = inventory.set_index('column').eligible.to_dict()
+        self.assertFalse(eligibility['goals_p90'])
+        self.assertFalse(eligibility['goals_conceded_p90'])
+        self.assertFalse(eligibility['clean_sheets_p90'])
+        self.assertFalse(eligibility['attacking_actions_p90'])
+        self.assertFalse(eligibility['xg_overperformance'])
+        self.assertFalse(eligibility['crosses_attempted'])
+        self.assertTrue(eligibility['xg_p90'])
+        self.assertTrue(eligibility['passes_completed_p90'])
+        self.assertTrue(eligibility['crosses_attempted_p90'])
+        self.assertTrue(eligibility['possession_lost_p90'])
         self.assertIn('outcome', inventory.loc[inventory.column.eq('goals_p90'), 'reason'].iloc[0].lower())
 
     def test_metric_selection_is_learned_not_position_hard_coded(self):
