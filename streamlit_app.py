@@ -40,6 +40,7 @@ SOURCE_KEY = "model_source"
 SCENARIO_KEY = "target_scenario"
 ROUTE_KEY = "driver_route"
 SQUAD_PLAN_KEY = "squad_plan"
+DEFAULT_EVIDENCE_THRESHOLD = 0.70
 
 
 def _fmt(value: Any, digits=1):
@@ -515,15 +516,9 @@ def render_target():
             key=f"target_position_{league}",
         )
     with c2:
-        probability = st.slider(
-            "Evidence threshold",
-            min_value=0.50,
-            max_value=0.95,
-            value=0.70,
-            step=0.05,
-            key="target_probability",
-            help="Empirical estimated probability threshold used to construct the goal frontier.",
-        )
+        probability = DEFAULT_EVIDENCE_THRESHOLD
+        st.metric("Evidence threshold", f"{probability:.0%}")
+        st.caption("Fixed model standard; not a user-tunable setting.")
     with c3:
         st.metric("Forecast season", default_context["season"])
         st.caption(
@@ -597,7 +592,7 @@ def render_target():
         m4.metric("Estimated target probability", f"{100 * float(recommended.get('estimated_target_probability', np.nan)):.0f}%")
 
     st.caption(
-        f"Requested empirical threshold: {scenario['requested_probability']:.0%}. "
+        f"Fixed empirical evidence threshold: {scenario['requested_probability']:.0%}. "
         "GF and GA must be taken from the same frontier pair."
     )
 
