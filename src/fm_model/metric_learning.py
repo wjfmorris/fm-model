@@ -16,7 +16,7 @@ from .roles import ROLE_LABELS
 
 NON_PERFORMANCE_COLUMNS = {
     "player_key", "player_id", "player_name", "team_id", "league", "season",
-    "position", "role_group", "owned", "age", "minutes", "appearances",
+    "position", "role_group", "owned", "age", "minutes", "appearances", "index",
     "market_value", "fmst_guide_value", "transfer_value", "asking_price",
     "transfer_fee", "fee", "wage", "weekly_wage", "annual_wage",
     "contract_months", "contract_years", "reputation", "currency",
