@@ -147,6 +147,7 @@ class RecruitmentTests(unittest.TestCase):
         st_profile = profile[profile.role_group.eq('ST')]
         self.assertFalse(st_profile.empty)
         self.assertTrue(st_profile.importance_score.notna().all())
+        self.assertAlmostEqual(float(st_profile.importance_weight.sum()), 1.0)
         self.assertTrue(st_profile.learned_outcome.isin(['scoring', 'preventing goals']).all())
 
         target = pool[~pool.owned & pool.role_group.eq('ST')].copy()
