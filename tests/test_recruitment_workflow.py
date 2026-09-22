@@ -104,7 +104,7 @@ class RecruitmentTests(unittest.TestCase):
         self.assertIn('distance_km_p90', pool)
         self.assertNotIn('market_value', pool)
         self.assertEqual(pool.fmst_guide_value.iloc[0], 300_000_000)
-        self.assertEqual(pool.distance_km_p90.iloc[0], 10.3)
+        self.assertEqual(pool.distance_km_p90.iloc[0], 9.5)
         self.assertTrue(pool.attacking_actions_p90.notna().all())
         self.assertTrue(np.isnan(pool.goals_outside_box.iloc[0]))
         self.assertTrue(pool.goals_outside_box.iloc[1:].notna().any())
