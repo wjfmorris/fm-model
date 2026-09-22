@@ -280,6 +280,7 @@ def assess_squad(pool, squad, assignments, *, formation="4-2-3-1", minimum_minut
                 current_pct = np.nan
             row = {
                 "role_group": role, "focus": focus, "metric": metric,
+                "tested_outcomes": learned.get("tested_outcomes", "manual"),
                 "learned_outcome": learned.get("learned_outcome", "manual"),
                 "direction": direction,
                 "importance_score": learned.get("importance_score", np.nan),
