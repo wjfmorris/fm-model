@@ -255,23 +255,55 @@ def assess_squad(pool, squad, assignments, *, formation="4-2-3-1", minimum_minut
                 ),
             }
             group_profiles.append(row)
-            profiles.append(row)
+
+        # Learned evidence controls how much each selected metric matters.
+        raw_weights = np.array([
+            float(p.get("importance_score"))
+            if pd.notna(p.get("importance_score", np.nan)) and float(p.get("importance_score")) > 0
+            else 0.0
+            for p in group_profiles
+        ], dtype=float)
+        if len(group_profiles):
+            if raw_weights.sum() <= 0:
+                raw_weights = np.ones(len(group_profiles), dtype=float)
+            normalised = raw_weights / raw_weights.sum()
+            for p, weight in zip(group_profiles, normalised):
+                p["importance_weight"] = float(weight)
+            profiles.extend(group_profiles)
+
         for _, player in team[team.role_group.eq(role)].iterrows():
             observed = [(p, player.get(p["metric"], np.nan)) for p in group_profiles]
             valid = [(p, v) for p, v in observed if pd.notna(v)]
-            count = sum(
-                (v >= p["screening_target"]) if p.get("direction", "higher") == "higher"
-                else (v <= p["screening_target"])
+            passed = [
+                (
+                    p,
+                    v,
+                    (v >= p["screening_target"]) if p.get("direction", "higher") == "higher"
+                    else (v <= p["screening_target"]),
+                )
                 for p, v in valid
-            )
+            ]
+            count = sum(bool(met) for _, _, met in passed)
+            observed_weight = sum(float(p.get("importance_weight", 0.0)) for p, _, _ in passed)
+            passed_weight = sum(float(p.get("importance_weight", 0.0)) for p, _, met in passed if met)
+            weighted_fit = passed_weight / observed_weight if observed_weight > 0 else np.nan
             enough = player.minutes >= minimum_minutes
             review = ("Insufficient minutes" if not enough else "Insufficient benchmark data" if not valid else
-                      "Review profile fit" if count < len(group_profiles) / 2 else "Fits several screening metrics")
+                      "Review profile fit" if weighted_fit < 0.5 else "Fits learned screening profile")
             players.append({"player_key": player.player_key, "player_name": player.player_name,
                             "role_group": role, "starter": bool(player.starter), "minutes": player.minutes,
                             "metrics_met": count, "metrics_observed": len(valid), "metrics_required": len(group_profiles),
+                            "weighted_profile_fit_pct": 100 * weighted_fit if pd.notna(weighted_fit) else np.nan,
                             "review": review})
-        gaps = [p["percentile_gap"] for p in group_profiles if pd.notna(p["percentile_gap"])]
+        valid_gaps = [
+            (float(p["percentile_gap"]), float(p.get("importance_weight", 0.0)))
+            for p in group_profiles if pd.notna(p["percentile_gap"])
+        ]
+        gaps = [gap for gap, _ in valid_gaps]
+        weighted_shortfall = (
+            float(np.average([gap for gap, _ in valid_gaps], weights=[weight for _, weight in valid_gaps]))
+            if valid_gaps and sum(weight for _, weight in valid_gaps) > 0 else np.nan
+        )
         missing = max(0, slots - len(starters))
         low = int((~starters.minutes.ge(minimum_minutes)).sum())
         review_names = [r["player_name"] for r in players if r["role_group"] == role and r["starter"] and r["review"] == "Review profile fit"]
@@ -280,12 +312,13 @@ def assess_squad(pool, squad, assignments, *, formation="4-2-3-1", minimum_minut
                            "learned_outcomes": learned_outcomes,
                            "unfilled_starter_slots": missing, "low_minutes_starters": low,
                            "average_percentile_shortfall": float(np.mean(gaps)) if gaps else np.nan,
+                           "weighted_percentile_shortfall": weighted_shortfall,
                            "review_players": ", ".join(review_names), "supported_metrics": len(group_profiles),
                            "next_step": "Assign a starter or scout cover" if missing else
                            "Gather more playing evidence" if low or not gaps else
                            "Compare potential upgrades" if review_names else "Lower recruitment priority"})
     priorities = pd.DataFrame(priorities).sort_values(
-        ["unfilled_starter_slots", "average_percentile_shortfall"], ascending=[False, False], na_position="last")
+        ["unfilled_starter_slots", "weighted_percentile_shortfall"], ascending=[False, False], na_position="last")
     return priorities.reset_index(drop=True), pd.DataFrame(profiles), pd.DataFrame(players)
 
 
@@ -299,9 +332,17 @@ def compare_targets(targets, squad, profile, role, *, minimum_minutes=900, leagu
     rows, details = [], []
     combined = pd.concat([squad.assign(source="My squad"),
                           targets[~targets.player_key.isin(squad.player_key)].assign(source="Target")], ignore_index=True)
+    profile_records = profile.to_dict("records")
+    total_profile_weight = sum(float(p.get("importance_weight", 1.0)) for p in profile_records)
+    if total_profile_weight <= 0:
+        total_profile_weight = float(len(profile_records))
+        for p in profile_records:
+            p["importance_weight"] = 1.0
+
     for _, player in combined[combined.role_group.eq(role)].iterrows():
         seen, passed = 0, 0
-        for p in profile.to_dict("records"):
+        passed_weight = 0.0
+        for p in profile_records:
             value = player.get(p["metric"], np.nan)
             if pd.notna(value):
                 met = bool(value >= p["screening_target"]) if p.get("direction", "higher") == "higher" else bool(value <= p["screening_target"])
@@ -309,15 +350,18 @@ def compare_targets(targets, squad, profile, role, *, minimum_minutes=900, leagu
                 met = None
             seen += int(pd.notna(value))
             passed += int(met is True)
+            if met is True:
+                passed_weight += float(p.get("importance_weight", 1.0))
             details.append({"player_key": player.player_key, "player_name": player.player_name,
                             "metric": p["metric"], "value": value,
                             "direction": p.get("direction", "higher"),
+                            "importance_weight": p.get("importance_weight", np.nan),
                             "screening_target": p["screening_target"], "meets_target": met})
         other_league = league is not None and normal(player.get("league", "")) != normal(league)
         rows.append({"player_key": player.player_key, "player_name": player.player_name,
                      "club": player.team_id, "source": player.source, "minutes": player.minutes,
-                     "metrics_met": passed, "metrics_observed": seen, "metrics_required": len(profile),
-                     "profile_match_pct": 100 * passed / len(profile),
+                     "metrics_met": passed, "metrics_observed": seen, "metrics_required": len(profile_records),
+                     "profile_match_pct": 100 * passed_weight / total_profile_weight,
                      "sufficient_minutes": bool(pd.notna(player.minutes) and player.minutes >= minimum_minutes),
                      "evidence": "Insufficient minutes" if pd.isna(player.minutes) or player.minutes < minimum_minutes else
                      "Unadjusted cross-league comparison" if other_league else
