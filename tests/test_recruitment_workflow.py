@@ -1,12 +1,14 @@
 """Behavioural regression tests for the staged FMST recruitment workflow."""
 import io
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 
 from fm_model.app_support import read_player_for_app
 from fm_model.errors import DataError
+from fm_model.data import prepare_player_export, read_table
 from fm_model.recruitment import (
     assess_squad, clean_statistics, compare_targets, cost_comparison,
     default_assignments, empty_costs, identify, merge_costs, prepare_inputs, replacement_cost,
@@ -44,6 +46,34 @@ def frames():
 
 
 class RecruitmentTests(unittest.TestCase):
+    def test_unparsed_numeric_fields_with_an_older_importer_registry(self):
+        # Reproduces the Cloud traceback: new recruitment code with an older
+        # numeric registry leaves appearances as text unless this layer parses it.
+        raw = prepare_player_export(read_table(export()), league='League A', season=2025)
+        raw.loc[0, 'appearances'] = '51'
+        raw.loc[1, 'appearances'] = ''
+        with patch('fm_model.recruitment.FMST_NUMERIC_COLUMNS', frozenset()):
+            clean, issues = clean_statistics(raw, league_matches='34')
+            squad = raw[raw.team_id.eq('My Club')]
+            pool, squad, _ = prepare_inputs(raw, squad)
+            _, profiles, _ = assess_squad(pool, squad, default_assignments(squad))
+        self.assertEqual(clean.appearances.iloc[0], 51.)
+        self.assertTrue(np.isnan(clean.appearances.iloc[1]))
+        self.assertTrue(pd.api.types.is_float_dtype(clean.appearances))
+        self.assertTrue(issues.field.eq('competition_scope').any())
+        self.assertFalse(profiles.empty)
+        self.assertEqual(raw.appearances.iloc[0], '51')
+
+    def test_invalid_appearance_text_is_an_actionable_input_error(self):
+        raw = prepare_player_export(read_table(export()), league='League A', season=2025)
+        raw.loc[0, 'appearances'] = 'not a count'
+        with patch('fm_model.recruitment.FMST_NUMERIC_COLUMNS', frozenset()):
+            with self.assertRaisesRegex(DataError, 'Invalid numeric values in appearances'):
+                clean_statistics(raw)
+        for value in ('', 0, -1, np.inf):
+            with self.assertRaisesRegex(DataError, 'League match count'):
+                clean_statistics(raw, league_matches=value)
+
     def test_new_schema_and_squad_overlap(self):
         pool, squad, issues = frames()
         self.assertEqual(len(pool), 60)

@@ -39,6 +39,17 @@ EXCLUDED_METRICS = {
 COST_FIELDS = ("weekly_wage", "purchase_fee", "sale_proceeds", "contract_years", "additional_fees")
 COST_METADATA = ("currency", "cost_note")
 
+# Validate the fields this module consumes even if the importer has not parsed
+# them. A long-running app can retain an older imported schema during a source
+# update; direct library callers can also pass canonical columns as strings.
+ANALYSIS_NUMERIC_COLUMNS = set().union(*map(set, FOCUSES.values())) | EXCLUDED_METRICS | {
+    "appearances", "goals", "xg_p90", "goals_p90", "key_passes_p90", "tackles_p90",
+    "pressures_attempted_p90", "pressure_success_pct", "clearances_p90", "blocks_p90",
+    "sprints_p90", "distance_km_p90", "crosses_completed", "crosses_attempted",
+    "open_play_crosses_completed", "open_play_crosses_attempted", "headers_won",
+    "headers_attempted", "xg_prevented", "xg_prevented_p90",
+}
+
 
 def normal(value):
     return unicodedata.normalize("NFKC", str(value)).strip().casefold()
@@ -69,14 +80,20 @@ def identify(frame):
 
 def clean_statistics(frame, *, league_matches=34):
     """Return a separate analysis copy; uploaded observations stay untouched."""
+    league_matches = parse_number(league_matches)
+    if not np.isfinite(league_matches) or league_matches <= 0:
+        raise DataError("League match count must be a positive finite number.")
     f = identify(frame)
     issues = []
     def issue(field, count, message):
         issues.append({"field": field, "rows": int(count), "message": message})
     if f.minutes.isna().any():
         issue("minutes", f.minutes.isna().sum(), "Minutes missing; player retained with insufficient evidence and excluded from benchmarks.")
-    for col in (set(FMST_NUMERIC_COLUMNS) | {"goals", "xg_prevented_p90"}).intersection(f):
-        f[col] = f[col].map(parse_number)
+    for col in (set(FMST_NUMERIC_COLUMNS) | ANALYSIS_NUMERIC_COLUMNS).intersection(f):
+        try:
+            f[col] = f[col].map(parse_number).astype(float)
+        except (DataError, TypeError, ValueError) as exc:
+            raise DataError(f"Invalid numeric values in {col}: {exc}") from exc
         invalid = ~np.isfinite(f[col]) & f[col].notna()
         if col not in {"xg_prevented", "xg_prevented_p90", "xg_overperformance"}:
             invalid |= f[col].lt(0)
