@@ -2,6 +2,17 @@
 
 Use multi-season league tables and one recent-season player statistics export. Team metrics are optional, not required. See [the current FMST26 upload contract](fmst26-uploads.md) for exact heading and unit handling and the limits of player-only comparisons. The collection options below describe additional data for research models.
 
+## Learned recruitment metrics
+
+The guided recruitment workflow does not assign a fixed statistic set to goalkeepers, defenders, midfielders or forwards. It inventories every imported/derived numeric performance field and tests each eligible field for each position group against both team scoring and team conceding.
+
+The default evidence procedure is leave-one-club-out validation. A metric must improve prediction relative to a league-average baseline before it can be selected. The model records whether higher or lower values are associated with the better outcome and removes highly redundant metrics before building the screening profile.
+
+Outcome/leakage fields such as Goals/90, Goals Conceded/90 and Clean Sheets, plus undocumented FMST composite action scores, remain visible in the metric inventory but are not allowed to compete as independent predictors. Raw count fields are converted to per-90 forms where possible before comparison.
+
+When statistics explicitly cover the league only and a matching completed league table exists, official GF/GA per match is preferred as the team outcome. Otherwise the model derives same-scope scoring/conceding outcomes from the uploaded league player pool where sufficient coverage exists. No hard-coded positional fallback is used if the data does not support a learned signal.
+
+
 # FM26 data collection checklist
 
 The backend accepts ordinary exports and does not depend on a particular extraction tool. Because FM26 may not provide a native statistics export in every edition/platform, collect the maximum information available from the save and preserve the source view name and season in each file.
