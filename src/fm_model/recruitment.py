@@ -14,7 +14,15 @@ import pandas as pd
 
 from .data import FMST_NUMERIC_COLUMNS, parse_number, require, season_number
 from .errors import DataError
-from .roles import FORMATION_PRESETS, ROLE_LABELS, canonical_role
+from .roles import (
+    FORMATION_PRESETS,
+    INTENDED_POSITION_OPTIONS,
+    ROLE_LABELS,
+    canonical_role,
+    exact_positions,
+    intended_position_role,
+    suggest_intended_position,
+)
 from .metric_learning import (
     LEAKAGE_OR_COMPOSITE_COLUMNS,
     add_rate_derivatives,
@@ -160,8 +168,41 @@ def prepare_inputs(pool, squad, *, league_matches=34):
     return pool, squad, issues
 
 
+def apply_intended_positions(assignments):
+    """Derive modelling groups from the user's exact intended positions."""
+
+    require(assignments, ["player_key", "intended_position"])
+    result = assignments.copy()
+    invalid = ~result["intended_position"].astype(str).str.upper().isin(INTENDED_POSITION_OPTIONS)
+    if invalid.any():
+        values = sorted(result.loc[invalid, "intended_position"].astype(str).unique().tolist())
+        raise DataError("Unknown intended position: " + ", ".join(values))
+    result["intended_position"] = result["intended_position"].astype(str).str.upper()
+    result["role_group"] = result["intended_position"].map(intended_position_role)
+    return result
+
+
 def default_assignments(squad, formation="4-2-3-1"):
-    result = squad[["player_key", "player_name", "position", "role_group", "minutes"]].copy() if "position" in squad else squad[["player_key", "player_name", "role_group", "minutes"]].copy()
+    columns = ["player_key", "player_name", "role_group", "minutes"]
+    if "position" in squad:
+        columns.insert(2, "position")
+    result = squad[columns].copy()
+
+    if "position" in result:
+        result["listed_positions"] = result["position"].map(
+            lambda value: ", ".join(exact_positions(value)) or "No exact position parsed"
+        )
+        result["intended_position"] = [
+            suggest_intended_position(position, role)
+            for position, role in zip(result["position"], result["role_group"])
+        ]
+    else:
+        result["listed_positions"] = ""
+        result["intended_position"] = [
+            suggest_intended_position("", role) for role in result["role_group"]
+        ]
+
+    result = apply_intended_positions(result)
     result["starter"] = False
     for role, slots in FORMATION_PRESETS[formation].items():
         ids = result[result.role_group.eq(role)].sort_values("minutes", ascending=False).head(slots).index
