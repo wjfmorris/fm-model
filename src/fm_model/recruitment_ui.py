@@ -262,8 +262,8 @@ def render_assessment(work):
     st.subheader("Where to look for improvements")
     st.dataframe(display_frame(priorities), hide_index=True, width="stretch")
     st.caption(
-        "Priority order uses missing starters first, then your starters' shortfall from the screening percentile "
-        "on metrics that earned positive out-of-sample evidence."
+        "Priority order uses missing starters first, then an importance-weighted percentile shortfall. "
+        "Metrics with stronger held-out evidence count more than marginal ones."
     )
     st.subheader("Your players")
     st.dataframe(display_frame(squad_review), hide_index=True, width="stretch")
