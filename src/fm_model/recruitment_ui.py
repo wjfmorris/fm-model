@@ -242,12 +242,14 @@ def render_assessment(work):
 
     st.subheader("Learned recruitment evidence")
     st.write(
-        "Every eligible performance metric is tested for each position against both team scoring and team conceding. "
+        "Every eligible performance metric is tested only against outcomes relevant to that position: "
+        "strikers and attacking midfield/wing players against scoring; centre-backs and goalkeepers against preventing goals; "
+        "full-backs/wing-backs and central/defensive midfielders against both. "
         "Importance is based on leave-one-club-out improvement over a league-average baseline; near-duplicate metrics are pruned."
     )
     st.caption(
         "A positive result is a predictive association in this save, not proof of causation. "
-        "Metrics with validation gain at or below zero are not selected."
+        "The evidence table shows the tested outcome for each position; metrics with validation gain at or below zero are not selected."
     )
     active_roles = list(FORMATION_PRESETS[formation])
     visible = ranking[ranking["role_group"].isin(active_roles)].copy()
