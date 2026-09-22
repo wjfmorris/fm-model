@@ -10,7 +10,7 @@ from fm_model.app_support import read_player_for_app
 from fm_model.errors import DataError
 from fm_model.data import prepare_player_export, read_table
 from fm_model.recruitment import (
-    assess_squad, clean_statistics, compare_targets, cost_comparison,
+    apply_intended_positions, assess_squad, clean_statistics, compare_targets, cost_comparison,
     default_assignments, empty_costs, identify, merge_costs, prepare_inputs, replacement_cost,
 )
 from fm_model.metric_learning import (
@@ -131,6 +131,35 @@ class RecruitmentTests(unittest.TestCase):
             identify(pool)
         with self.assertRaises(DataError):
             prepare_inputs(squad, squad.assign(season=2024))
+
+    def test_intended_position_is_editable_and_drives_model_group(self):
+        pool, squad, _ = frames()
+        assignments = default_assignments(squad)
+        self.assertIn("intended_position", assignments.columns)
+        self.assertIn("listed_positions", assignments.columns)
+
+        striker = assignments[assignments.role_group.eq("ST")].index[0]
+        assignments.loc[striker, "intended_position"] = "AMR"
+        changed = apply_intended_positions(assignments)
+        self.assertEqual(changed.loc[striker, "intended_position"], "AMR")
+        self.assertEqual(changed.loc[striker, "role_group"], "AM_W")
+
+        changed.loc[striker, "intended_position"] = "ST"
+        restored = apply_intended_positions(changed)
+        self.assertEqual(restored.loc[striker, "role_group"], "ST")
+
+    def test_multifunctional_player_can_be_assigned_to_one_exact_position(self):
+        pool, squad, _ = frames()
+        row = squad.iloc[[0]].copy()
+        row["position"] = "M (L), AM (RL), ST"
+        row["role_group"] = "ST"
+        assignment = default_assignments(row)
+        self.assertEqual(assignment.intended_position.iloc[0], "ST")
+        self.assertIn("AML", assignment.listed_positions.iloc[0])
+        self.assertIn("AMR", assignment.listed_positions.iloc[0])
+        assignment.loc[assignment.index[0], "intended_position"] = "AML"
+        assignment = apply_intended_positions(assignment)
+        self.assertEqual(assignment.role_group.iloc[0], "AM_W")
 
     def test_learned_profiles_and_fixed_benchmark_candidate_comparison(self):
         pool, squad, _ = frames()
