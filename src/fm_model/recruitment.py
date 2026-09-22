@@ -221,11 +221,38 @@ def profile_metrics(focus, pool):
     return [c for c in cols if c in available_metrics(pool)]
 
 
+def finish_target_percentile(target_position, n_teams):
+    """Convert a target league rank to the equivalent peer-performance percentile.
+
+    Uses the midpoint of each finishing-rank band: in an 18-team league,
+    1st maps to 97.2%, 6th to 69.4%, and 18th to 2.8%.
+    """
+
+    try:
+        position = int(target_position)
+        teams = int(n_teams)
+    except (TypeError, ValueError) as exc:
+        raise DataError("Target position and league size must be integers.") from exc
+    if teams < 4 or position < 1 or position > teams:
+        raise DataError("Target position must lie within a league of at least four teams.")
+    return 100.0 * (teams - position + 0.5) / teams
+
+
 def assess_squad(pool, squad, assignments, *, formation="4-2-3-1", minimum_minutes=900,
-                 target_percentile=60, focuses=None, metrics=None, metric_evidence=None):
-    """Apply learned metric directions to league-relative screening thresholds."""
-    if not 0 < target_percentile < 100:
+                 target_percentile=None, target_position=None, n_teams=None,
+                 focuses=None, metrics=None, metric_evidence=None):
+    """Apply learned metric directions to season-target-linked peer thresholds."""
+    if target_position is not None or n_teams is not None:
+        if target_position is None or n_teams is None:
+            raise DataError("Provide both target_position and n_teams.")
+        target_percentile = finish_target_percentile(target_position, n_teams)
+    elif target_percentile is None:
+        # Backwards-compatible library fallback. The guided app always supplies
+        # target_position and n_teams so its threshold is never arbitrary.
+        target_percentile = 60.0
+    if not 0 < float(target_percentile) < 100:
         raise DataError("Screening percentile must lie between 0 and 100.")
+    target_percentile = float(target_percentile)
     if minimum_minutes <= 0:
         raise DataError("Minimum comparison minutes must be positive.")
     require(assignments, ["player_key", "role_group", "starter"])
@@ -291,6 +318,8 @@ def assess_squad(pool, squad, assignments, *, formation="4-2-3-1", minimum_minut
                 "current_percentile": current_pct,
                 "percentile_gap": max(0, target_percentile - current_pct) if len(current) else np.nan,
                 "peer_count": len(values), "target_percentile": target_percentile,
+                "season_target_position": target_position if target_position is not None else np.nan,
+                "league_team_count": n_teams if n_teams is not None else np.nan,
                 "evidence": learned.get(
                     "evidence",
                     "Manual metric selection; threshold is a descriptive positional benchmark",
@@ -360,8 +389,12 @@ def assess_squad(pool, squad, assignments, *, formation="4-2-3-1", minimum_minut
                            "Gather more playing evidence" if low or not gaps else
                            "Compare potential upgrades" if review_names else "Lower recruitment priority"})
     priorities = pd.DataFrame(priorities).sort_values(
-        ["unfilled_starter_slots", "weighted_percentile_shortfall"], ascending=[False, False], na_position="last")
-    return priorities.reset_index(drop=True), pd.DataFrame(profiles), pd.DataFrame(players)
+        ["unfilled_starter_slots", "weighted_percentile_shortfall"],
+        ascending=[True, True],
+        na_position="first",
+    ).reset_index(drop=True)
+    priorities["change_importance_order"] = np.arange(1, len(priorities) + 1)
+    return priorities, pd.DataFrame(profiles), pd.DataFrame(players)
 
 
 def compare_targets(targets, squad, profile, role, *, minimum_minutes=900, league=None):
