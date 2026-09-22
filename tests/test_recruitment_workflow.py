@@ -224,8 +224,13 @@ class RecruitmentTests(unittest.TestCase):
         self.assertIn('outcome', inventory.loc[inventory.column.eq('goals_p90'), 'reason'].iloc[0].lower())
 
     def test_unknown_future_numeric_metric_is_discovered_automatically(self):
-        raw = prepare_player_export(read_table(export()), league='League A', season=2025)
-        raw['Brand New FMST Metric per 90'] = [str(1 + i / 10) for i in range(len(raw))]
+        source = pd.read_csv(export())
+        source['Brand New FMST Metric per 90'] = [str(1 + i / 10) for i in range(len(source))]
+        raw = read_player_for_app(
+            io.BytesIO(source.to_csv(index=False).encode()),
+            league='League A',
+            season=2025,
+        )
         cleaned, _ = clean_statistics(raw)
         self.assertIn('brand_new_fmst_metric_per_90', cleaned.columns)
         self.assertIn('brand_new_fmst_metric_per_90', available_metrics(cleaned))
