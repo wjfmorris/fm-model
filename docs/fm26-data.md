@@ -4,7 +4,7 @@ Use multi-season league tables and one recent-season player statistics export. T
 
 ## Learned recruitment metrics
 
-The guided recruitment workflow does not assign a fixed statistic set to goalkeepers, defenders, midfielders or forwards. It inventories every imported/derived numeric performance field and tests each eligible field for each position group against both team scoring and team conceding.
+The guided recruitment workflow does not assign a fixed statistic set to goalkeepers, defenders, midfielders or forwards. It inventories every imported/derived numeric performance field, but tests each field only against outcomes relevant to that position: ST and AM/W against scoring; GK and CB against preventing goals; FB/WB and CM/DM against both.
 
 The default evidence procedure is leave-one-club-out validation. A metric must improve prediction relative to a league-average baseline before it can be selected. The model records whether higher or lower values are associated with the better outcome and removes highly redundant metrics before building the screening profile.
 
