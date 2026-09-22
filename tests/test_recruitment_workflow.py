@@ -187,6 +187,16 @@ class RecruitmentTests(unittest.TestCase):
         self.assertTrue(modest.target_percentile.eq(25.0).all())
         self.assertTrue(ambitious.season_target_position.eq(1).all())
         self.assertTrue(modest.season_target_position.eq(8).all())
+        paired = ambitious[["role_group", "metric", "direction", "screening_target"]].merge(
+            modest[["role_group", "metric", "screening_target"]],
+            on=["role_group", "metric"],
+            suffixes=("_ambitious", "_modest"),
+        )
+        for row in paired.itertuples():
+            if row.direction == "higher":
+                self.assertGreaterEqual(row.screening_target_ambitious, row.screening_target_modest)
+            else:
+                self.assertLessEqual(row.screening_target_ambitious, row.screening_target_modest)
 
     def test_position_changes_are_ordered_least_to_most_important(self):
         pool, squad, _ = frames()
