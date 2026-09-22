@@ -12,10 +12,11 @@ from .data import read_table, season_number
 from .errors import DataError
 from .pipeline import MoneyballModel
 from .roles import FORMATION_PRESETS, ROLE_LABELS
+from .metric_learning import learn_metric_importance, metric_inventory, select_learned_metrics
 from .recruitment import (
-    COST_FIELDS, DEFAULT_FOCUS, FOCUSES, assess_squad, available_metrics, clean_statistics,
+    COST_FIELDS, assess_squad, available_metrics, clean_statistics,
     compare_targets, cost_comparison, default_assignments, empty_costs, merge_costs,
-    normal, prepare_inputs, profile_metrics, replacement_cost,
+    normal, prepare_inputs, replacement_cost,
 )
 
 FORMATS = ["csv", "tsv", "html", "htm", "xlsx", "xlsm"]
@@ -116,8 +117,19 @@ def render_checks(work):
         st.error(issue)
     if not work["issues"].empty:
         st.dataframe(work["issues"], hide_index=True, width="stretch")
-    st.info("Squad priorities use descriptive positional benchmarks. These uploads do not establish learned goal drivers, next-season squad GF/GA, or goals added by a signing.")
-    st.caption("Guide Value is reference-only. Undocumented composite action scores and outside-box goals are excluded from screening. Percentages remain on a 0–100 scale; existing per-90 fields are not divided again. xG prevented per 90 is derived from exported total xG prevented and minutes where needed.")
+    inventory = metric_inventory(pool)
+    eligible = int(inventory["eligible"].sum()) if not inventory.empty else 0
+    performance_rows = int(inventory["category"].isin(["performance", "raw total", "outcome/composite"]).sum()) if not inventory.empty else 0
+    st.info(
+        f"Metric learning sees {performance_rows} imported/derived performance fields; "
+        f"{eligible} are currently eligible independent predictors. It tests them rather than assigning metrics to positions in advance."
+    )
+    st.caption(
+        "Goals/90, goals conceded/90, clean sheets and undocumented FMST composite action scores remain visible in the inventory "
+        "but are excluded as predictors to prevent outcome leakage or circular scoring. Raw count fields use per-90 derivatives where possible."
+    )
+    with st.expander("Metric inventory: every imported/derived field"):
+        st.dataframe(display_frame(inventory), hide_index=True, width="stretch")
     table = work["league"]
     if {"team_id", "season", "league"}.issubset(table):
         latest = table[(table.league.astype(str) == str(pool.league.iloc[0]))].copy()
@@ -158,44 +170,114 @@ def render_baseline(work):
 def render_assessment(work):
     st.subheader("Confirm your formation and player roles")
     formation = st.selectbox("Formation", list(FORMATION_PRESETS), key="guided_formation")
-    minimum = st.number_input("Minimum minutes for a dependable comparison", 90, 5000, 900, step=90, key="guided_minimum")
-    percentile = st.slider("Recruitment screening percentile", 25, 90, 60, step=5, key="guided_percentile",
-                           help="An editable scouting standard, independent of the finishing-position model. 60 means the 60th percentile of eligible positional peers.")
-    st.caption("Starting assignments use the most-played players in each broad position group. Edit multifunctional players and confirm your intended starters. Each player occupies one group.")
+    minimum = st.number_input("Minimum minutes for a dependable player comparison", 90, 5000, 900, step=90, key="guided_minimum")
+    percentile = st.slider(
+        "Recruitment screening percentile", 25, 90, 60, step=5, key="guided_percentile",
+        help="After the model learns which metrics matter, this sets how strong a candidate should be relative to positional peers.",
+    )
+    max_metrics = st.slider(
+        "Learned metrics per position", 1, 8, 4, step=1, key="guided_learned_metric_count",
+        help="The strongest out-of-sample, non-redundant metrics are selected. They are not treated as equally important.",
+    )
+    st.caption(
+        "Starting assignments use the most-played players in each broad position group. "
+        "Edit multifunctional players and confirm your intended starters."
+    )
     revision = work["revision"]
-    assignment = st.data_editor(default_assignments(work["squad"], formation), hide_index=True, width="stretch",
-                                disabled=["player_key", "player_name", "position", "minutes"],
-                                column_config={"player_key": None,
-                                    "role_group": st.column_config.SelectboxColumn("Intended position group", options=list(ROLE_LABELS), required=True),
-                                    "starter": st.column_config.CheckboxColumn("Intended starter", required=True)},
-                                key=f"assignments_{revision}_{formation}")
-    focuses, metrics = {}, {}
-    with st.expander("Recruitment focus and screening statistics", expanded=False):
-        st.write("Starting menus are scouting choices, not learned importance weights. Thresholds come from your league's positional distributions. All selected metrics screen for higher values; defensive activity depends strongly on team tactics and opportunity.")
-        for role in FORMATION_PRESETS[formation]:
-            focus = st.selectbox(ROLE_LABELS[role], list(FOCUSES), index=list(FOCUSES).index(DEFAULT_FOCUS[role]), key=f"focus_{revision}_{role}")
-            focuses[role] = focus
-            metrics[role] = st.multiselect(f"Statistics for {ROLE_LABELS[role]}", available_metrics(work["pool"]),
-                                            default=profile_metrics(focus, work["pool"]), key=f"metrics_{revision}_{role}_{focus}")
+    assignment = st.data_editor(
+        default_assignments(work["squad"], formation),
+        hide_index=True, width="stretch",
+        disabled=["player_key", "player_name", "position", "minutes"],
+        column_config={
+            "player_key": None,
+            "role_group": st.column_config.SelectboxColumn("Intended position group", options=list(ROLE_LABELS), required=True),
+            "starter": st.column_config.CheckboxColumn("Intended starter", required=True),
+        },
+        key=f"assignments_{revision}_{formation}",
+    )
+
     try:
-        priorities, profile, squad_review = assess_squad(work["pool"], work["squad"], assignment,
-            formation=formation, minimum_minutes=minimum, target_percentile=percentile, focuses=focuses, metrics=metrics)
+        ranking = learn_metric_importance(
+            work["pool"], work["league"], scope=work.get("scope"),
+            minimum_role_minutes=max(450, min(int(minimum), 900)),
+        )
+        learned_metrics = select_learned_metrics(
+            work["pool"], ranking, max_metrics=int(max_metrics),
+            minimum_validation_gain=0.0, redundancy_threshold=0.85,
+        )
+    except DataError as exc:
+        st.error("The app cannot learn a defensible recruitment focus from this export yet: " + str(exc))
+        st.caption("No hard-coded positional fallback is used. Broaden the league player export or include the requested outcome fields.")
+        return None
+
+    st.subheader("Learned recruitment evidence")
+    st.write(
+        "Every eligible performance metric is tested for each position against both team scoring and team conceding. "
+        "Importance is based on leave-one-club-out improvement over a league-average baseline; near-duplicate metrics are pruned."
+    )
+    st.caption(
+        "A positive result is a predictive association in this save, not proof of causation. "
+        "Metrics with validation gain at or below zero are not selected."
+    )
+    active_roles = list(FORMATION_PRESETS[formation])
+    visible = ranking[ranking["role_group"].isin(active_roles)].copy()
+    pairs = {(r, m) for r, ms in learned_metrics.items() for m in ms}
+    visible["selected"] = [(str(r), str(m)) in pairs for r, m in zip(visible["role_group"], visible["metric"])]
+    st.dataframe(display_frame(visible), hide_index=True, width="stretch")
+
+    manual = st.checkbox(
+        "Manually override the learned metric selection", value=False,
+        key=f"manual_metric_override_{revision}_{formation}",
+        help="Off by default. Manual choices replace only the screening list, not the learned evidence.",
+    )
+    metrics = {role: list(learned_metrics.get(role, [])) for role in active_roles}
+    if manual:
+        st.warning("Manual override is active. The ranking above remains the learned evidence.")
+        all_metrics = available_metrics(work["pool"])
+        for role in active_roles:
+            metrics[role] = st.multiselect(
+                f"Statistics for {ROLE_LABELS[role]}", all_metrics,
+                default=metrics[role], key=f"manual_metrics_{revision}_{role}",
+            )
+
+    no_signal = [ROLE_LABELS[r] for r in active_roles if not metrics.get(r)]
+    if no_signal:
+        st.warning(
+            "No metric produced positive out-of-sample evidence for: " + ", ".join(no_signal)
+            + ". The app will not invent a profile for those positions."
+        )
+
+    focuses = {role: "Learned from uploaded league data" for role in active_roles}
+    try:
+        priorities, profile, squad_review = assess_squad(
+            work["pool"], work["squad"], assignment,
+            formation=formation, minimum_minutes=minimum,
+            target_percentile=percentile, focuses=focuses,
+            metrics=metrics, metric_evidence=ranking,
+        )
     except DataError as exc:
         st.error(str(exc))
         return None
+
     st.subheader("Where to look for improvements")
     st.dataframe(display_frame(priorities), hide_index=True, width="stretch")
-    st.caption("Priority order: unfilled starting slots, then average shortfall from the selected percentile across supported metrics. Missing or low-minute evidence is flagged. A profile shortfall is a scouting prompt, not a sell instruction or a predicted goal deficit.")
+    st.caption(
+        "Priority order uses missing starters first, then an importance-weighted percentile shortfall. "
+        "Metrics with stronger held-out evidence count more than marginal ones."
+    )
     st.subheader("Your players")
     st.dataframe(display_frame(squad_review), hide_index=True, width="stretch")
-    st.subheader("What to look for in potential signings")
+    st.subheader("What the learned model says to look for")
     if profile.empty:
-        st.warning("Not enough varied data: each screening statistic needs at least five eligible positional peers. Try a broader export or review the minutes setting.")
+        st.warning("No learned metric currently has enough positional peer data to create a stable screening threshold.")
     else:
         st.dataframe(display_frame(profile), hide_index=True, width="stretch")
-        st.download_button("Download recruitment profiles", frame_to_csv_bytes(profile), "recruitment_profiles.csv", "text/csv")
+        st.download_button("Download learned recruitment profiles", frame_to_csv_bytes(profile), "learned_recruitment_profiles.csv", "text/csv")
+        st.download_button("Download all metric evidence", frame_to_csv_bytes(ranking), "learned_metric_importance.csv", "text/csv")
     st.download_button("Download squad review", frame_to_csv_bytes(squad_review), "squad_review.csv", "text/csv")
-    assigned_squad = work["squad"].drop(columns="role_group").merge(assignment[["player_key", "role_group"]], on="player_key", validate="one_to_one")
+    assigned_squad = work["squad"].drop(columns="role_group").merge(
+        assignment[["player_key", "role_group"]], on="player_key", validate="one_to_one"
+    )
     return profile, assigned_squad, int(minimum)
 
 
@@ -246,7 +328,11 @@ def render_targets(work, assessment):
         st.info("Resolve starter assignments to compare candidates with a recruitment profile.")
         return
     profile, squad, minimum = assessment
-    role = st.selectbox("Position to compare", list(DEFAULT_FOCUS), format_func=ROLE_LABELS.get, key="compare_role")
+    role_options = profile["role_group"].dropna().astype(str).unique().tolist()
+    if not role_options:
+        st.info("No learned positional profile is available for target comparison.")
+        return targets
+    role = st.selectbox("Position to compare", role_options, format_func=ROLE_LABELS.get, key="compare_role")
     result, details = compare_targets(targets, squad, profile, role, minimum_minutes=minimum, league=str(work["pool"].league.iloc[0]))
     st.caption("Profile match is the fraction of screening thresholds met, not a football-value score. Missing metrics do not count as successes. Check minutes and league context before acting.")
     if result.empty:

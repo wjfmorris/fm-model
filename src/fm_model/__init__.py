@@ -8,6 +8,11 @@ from .pipeline import MoneyballModel
 from .players import PlayerValuationModel
 from .outcomes import PlayerOutcomeModel
 from .planning import SquadPlanner
+from .metric_learning import (
+    learn_metric_importance,
+    metric_inventory,
+    select_learned_metrics,
+)
 from .roles import FORMATION_PRESETS, ROLE_LABELS, canonical_role
 from .catalogue import DATA_CATALOGUE
 
@@ -20,6 +25,9 @@ __all__ = [
     "PlayerValuationModel",
     "PlayerOutcomeModel",
     "SquadPlanner",
+    "learn_metric_importance",
+    "metric_inventory",
+    "select_learned_metrics",
     "FORMATION_PRESETS",
     "ROLE_LABELS",
     "canonical_role",
@@ -29,4 +37,4 @@ __all__ = [
     "read_table",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

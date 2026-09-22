@@ -1,7 +1,8 @@
-"""FMST-first recruitment: fixed peer benchmarks, explicit evidence and real costs.
+"""FMST-first recruitment with learned metric evidence and explicit costs.
 
-These are descriptive screening profiles, not learned goal-impact weights. League
-GF/GA targets remain a separately fitted model until compatible team data exists.
+Recruitment metrics are learned from the uploaded league player pool rather than
+assigned to positions in source code. Screening thresholds remain transparent
+league-relative benchmarks after the metric-learning step.
 """
 from __future__ import annotations
 
@@ -14,35 +15,24 @@ import pandas as pd
 from .data import FMST_NUMERIC_COLUMNS, parse_number, require, season_number
 from .errors import DataError
 from .roles import FORMATION_PRESETS, ROLE_LABELS, canonical_role
+from .metric_learning import (
+    LEAKAGE_OR_COMPOSITE_COLUMNS,
+    add_rate_derivatives,
+    available_metrics as learned_available_metrics,
+)
 
-# Purpose-specific starting menus, exposed as editable choices in the UI.
-FOCUSES = {
-    "Shot stopping": ("save_pct", "xg_prevented_p90"),
-    "Scoring opportunities": ("non_penalty_xg_p90", "shots_p90", "shots_on_target_p90"),
-    "Chance creation": ("xa_p90", "open_play_key_passes_p90", "progressive_passes_p90"),
-    "Ball progression": ("progressive_passes_p90", "dribbles_p90", "pass_completion_pct"),
-    "Ball winning (context dependent)": ("interceptions_p90", "possession_won_p90", "tackle_success_pct"),
-    "Aerial and defensive activity (context dependent)": ("header_win_pct", "interceptions_p90", "key_tackles_p90"),
-}
-DEFAULT_FOCUS = {
-    "GK": "Shot stopping", "CB": "Aerial and defensive activity (context dependent)",
-    "FB_WB": "Chance creation", "CM_DM": "Ball progression",
-    "AM_W": "Chance creation", "ST": "Scoring opportunities",
-}
-# Composite actions have undocumented formulas; goals-derived fields are not
-# allowed to masquerade as independent goal drivers.
-EXCLUDED_METRICS = {
-    "goals_outside_box", "goal_contributions_p90", "non_penalty_contributions_p90",
-    "defensive_actions_p90", "attacking_actions_p90", "creative_actions_p90",
-    "goalkeeping_actions_p90", "xg_overperformance",
-}
+# Legacy manual groupings are retained only for API/backwards compatibility.
+# The Streamlit workflow no longer uses these as defaults.
+FOCUSES = {}
+DEFAULT_FOCUS = {}
+EXCLUDED_METRICS = set(LEAKAGE_OR_COMPOSITE_COLUMNS)
 COST_FIELDS = ("weekly_wage", "purchase_fee", "sale_proceeds", "contract_years", "additional_fees")
 COST_METADATA = ("currency", "cost_note")
 
 # Validate the fields this module consumes even if the importer has not parsed
 # them. A long-running app can retain an older imported schema during a source
 # update; direct library callers can also pass canonical columns as strings.
-ANALYSIS_NUMERIC_COLUMNS = set().union(*map(set, FOCUSES.values())) | EXCLUDED_METRICS | {
+ANALYSIS_NUMERIC_COLUMNS = EXCLUDED_METRICS | {
     "appearances", "goals", "xg_p90", "goals_p90", "key_passes_p90", "tackles_p90",
     "pressures_attempted_p90", "pressure_success_pct", "clearances_p90", "blocks_p90",
     "sprints_p90", "distance_km_p90", "crosses_completed", "crosses_attempted",
@@ -119,10 +109,33 @@ def clean_statistics(frame, *, league_matches=34):
             if invalid.any():
                 issue(made, invalid.sum(), "Completed count exceeds attempts; completed value excluded.")
                 f.loc[invalid, made] = np.nan
-    if "xg_prevented" in f and "xg_prevented_p90" not in f:
-        f["xg_prevented_p90"] = f.xg_prevented * 90 / f.minutes.replace(0, np.nan)
-    for metric in EXCLUDED_METRICS.intersection(f):
-        f[metric] = np.nan
+    # Parse any additional numeric metric column that FMST adds in future exports.
+    # Text/context fields simply fail this conservative all-values parse and remain text.
+    reserved_text = {
+        "player_key", "player_id", "player_name", "team_id", "league", "position",
+        "role_group", "owned",
+    }
+    for col in f.columns:
+        if col in reserved_text or pd.api.types.is_numeric_dtype(f[col]):
+            continue
+        nonblank = f[col].dropna()
+        if nonblank.empty:
+            continue
+        parsed = []
+        parse_failed = False
+        for value in f[col]:
+            try:
+                parsed.append(parse_number(value))
+            except (DataError, TypeError, ValueError):
+                if pd.isna(value) or str(value).strip().lower() in {"", "-", "—", "n/a", "unknown", "none"}:
+                    parsed.append(np.nan)
+                else:
+                    parse_failed = True
+                    break
+        if not parse_failed:
+            f[col] = pd.Series(parsed, index=f.index, dtype=float)
+
+    f = add_rate_derivatives(f)
     return f, pd.DataFrame(issues, columns=["field", "rows", "message"])
 
 
@@ -157,25 +170,19 @@ def default_assignments(squad, formation="4-2-3-1"):
 
 
 def available_metrics(pool):
-    candidates = set().union(*map(set, FOCUSES.values())) | {
-        "xg_p90", "key_passes_p90", "goals_p90", "tackles_p90", "pressures_attempted_p90",
-        "pressure_success_pct", "clearances_p90", "blocks_p90", "sprints_p90", "distance_km_p90",
-    }
-    return sorted(c for c in candidates if c in pool and pool[c].notna().any())
+    """All eligible independent numeric performance metrics in this export."""
+    return learned_available_metrics(pool)
 
 
 def profile_metrics(focus, pool):
-    cols = list(FOCUSES[focus])
-    if "non_penalty_xg_p90" in cols and ("non_penalty_xg_p90" not in pool or pool.non_penalty_xg_p90.notna().sum() < 5):
-        cols[cols.index("non_penalty_xg_p90")] = "xg_p90"
-    if "open_play_key_passes_p90" in cols and "open_play_key_passes_p90" not in pool:
-        cols[cols.index("open_play_key_passes_p90")] = "key_passes_p90"
+    """Legacy manual helper; learned selection is the default workflow."""
+    cols = list(FOCUSES.get(focus, ()))
     return [c for c in cols if c in available_metrics(pool)]
 
 
 def assess_squad(pool, squad, assignments, *, formation="4-2-3-1", minimum_minutes=900,
-                 target_percentile=60, focuses=None, metrics=None):
-    """Generate empirical screening ranges and starter shortfalls, never goal gains."""
+                 target_percentile=60, focuses=None, metrics=None, metric_evidence=None):
+    """Apply learned metric directions to league-relative screening thresholds."""
     if not 0 < target_percentile < 100:
         raise DataError("Screening percentile must lie between 0 and 100.")
     if minimum_minutes <= 0:
@@ -193,58 +200,125 @@ def assess_squad(pool, squad, assignments, *, formation="4-2-3-1", minimum_minut
     reference = pool.copy()
     mapping = assignments.set_index("player_key").role_group
     reference["role_group"] = reference.player_key.map(mapping).fillna(reference.role_group)
-    focuses = focuses or DEFAULT_FOCUS
+    focuses = focuses or {}
+    evidence_lookup = {}
+    if metric_evidence is not None and not metric_evidence.empty:
+        evidence_lookup = {
+            (str(row["role_group"]), str(row["metric"])): row
+            for row in metric_evidence.to_dict("records")
+        }
     profiles, priorities, players = [], [], []
     for role, slots in FORMATION_PRESETS[formation].items():
         starters = team[team.role_group.eq(role) & team.starter]
         if len(starters) > slots:
             raise DataError(f"{ROLE_LABELS[role]}: select at most {slots} starters for {formation}.")
         peers = reference[reference.role_group.eq(role) & reference.minutes.ge(minimum_minutes)]
-        focus = focuses.get(role, DEFAULT_FOCUS[role])
-        selected = metrics.get(role, []) if metrics is not None else profile_metrics(focus, reference)
+        focus = focuses.get(role, "Learned from uploaded league data")
+        selected = metrics.get(role, []) if metrics is not None else []
         group_profiles = []
         for metric in selected:
             if metric not in available_metrics(reference):
                 continue
-            values = peers[metric].dropna()
+            values = pd.to_numeric(peers[metric], errors="coerce").dropna()
             if len(values) < 5 or values.nunique() < 2:
                 continue
-            target = float(values.quantile(target_percentile / 100))
-            current = starters.loc[starters.minutes.ge(minimum_minutes), metric].dropna() if metric in starters else pd.Series(dtype=float)
+            learned = evidence_lookup.get((role, metric), {})
+            direction = str(learned.get("direction", "higher"))
+            quantile = target_percentile / 100 if direction == "higher" else 1 - target_percentile / 100
+            target = float(values.quantile(quantile))
+            strong_quantile = .75 if direction == "higher" else .25
+            current = (
+                pd.to_numeric(starters.loc[starters.minutes.ge(minimum_minutes), metric], errors="coerce").dropna()
+                if metric in starters else pd.Series(dtype=float)
+            )
             current_median = float(current.median()) if len(current) else np.nan
-            current_pct = float(100 * ((values < current_median).mean() + .5 * (values == current_median).mean())) if len(current) else np.nan
-            row = {"role_group": role, "focus": focus, "metric": metric,
-                   "league_median": float(values.median()), "screening_target": target,
-                   "peer_upper_quartile": float(values.quantile(.75)), "current_starter_median": current_median,
-                   "current_percentile": current_pct, "percentile_gap": max(0, target_percentile - current_pct) if len(current) else np.nan,
-                   "peer_count": len(values), "target_percentile": target_percentile,
-                   "evidence": "Descriptive league benchmark; not learned goal impact"}
+            if len(current):
+                raw_pct = float(100 * ((values < current_median).mean() + .5 * (values == current_median).mean()))
+                current_pct = raw_pct if direction == "higher" else 100.0 - raw_pct
+            else:
+                current_pct = np.nan
+            row = {
+                "role_group": role, "focus": focus, "metric": metric,
+                "learned_outcome": learned.get("learned_outcome", "manual"),
+                "direction": direction,
+                "importance_score": learned.get("importance_score", np.nan),
+                "validation_gain": learned.get("validation_gain", np.nan),
+                "league_median": float(values.median()), "screening_target": target,
+                "peer_strong_quartile": float(values.quantile(strong_quantile)),
+                "current_starter_median": current_median,
+                "current_percentile": current_pct,
+                "percentile_gap": max(0, target_percentile - current_pct) if len(current) else np.nan,
+                "peer_count": len(values), "target_percentile": target_percentile,
+                "evidence": learned.get(
+                    "evidence",
+                    "Manual metric selection; threshold is a descriptive positional benchmark",
+                ),
+            }
             group_profiles.append(row)
-            profiles.append(row)
+
+        # Learned evidence controls how much each selected metric matters.
+        raw_weights = np.array([
+            float(p.get("importance_score"))
+            if pd.notna(p.get("importance_score", np.nan)) and float(p.get("importance_score")) > 0
+            else 0.0
+            for p in group_profiles
+        ], dtype=float)
+        if len(group_profiles):
+            if raw_weights.sum() <= 0:
+                raw_weights = np.ones(len(group_profiles), dtype=float)
+            normalised = raw_weights / raw_weights.sum()
+            for p, weight in zip(group_profiles, normalised):
+                p["importance_weight"] = float(weight)
+            profiles.extend(group_profiles)
+
         for _, player in team[team.role_group.eq(role)].iterrows():
             observed = [(p, player.get(p["metric"], np.nan)) for p in group_profiles]
             valid = [(p, v) for p, v in observed if pd.notna(v)]
-            count = sum(v >= p["screening_target"] for p, v in valid)
+            passed = [
+                (
+                    p,
+                    v,
+                    (v >= p["screening_target"]) if p.get("direction", "higher") == "higher"
+                    else (v <= p["screening_target"]),
+                )
+                for p, v in valid
+            ]
+            count = sum(bool(met) for _, _, met in passed)
+            observed_weight = sum(float(p.get("importance_weight", 0.0)) for p, _, _ in passed)
+            passed_weight = sum(float(p.get("importance_weight", 0.0)) for p, _, met in passed if met)
+            weighted_fit = passed_weight / observed_weight if observed_weight > 0 else np.nan
             enough = player.minutes >= minimum_minutes
             review = ("Insufficient minutes" if not enough else "Insufficient benchmark data" if not valid else
-                      "Review profile fit" if count < len(group_profiles) / 2 else "Fits several screening metrics")
+                      "Review profile fit" if weighted_fit < 0.5 else "Fits learned screening profile")
             players.append({"player_key": player.player_key, "player_name": player.player_name,
                             "role_group": role, "starter": bool(player.starter), "minutes": player.minutes,
                             "metrics_met": count, "metrics_observed": len(valid), "metrics_required": len(group_profiles),
+                            "weighted_profile_fit_pct": 100 * weighted_fit if pd.notna(weighted_fit) else np.nan,
                             "review": review})
-        gaps = [p["percentile_gap"] for p in group_profiles if pd.notna(p["percentile_gap"])]
+        valid_gaps = [
+            (float(p["percentile_gap"]), float(p.get("importance_weight", 0.0)))
+            for p in group_profiles if pd.notna(p["percentile_gap"])
+        ]
+        gaps = [gap for gap, _ in valid_gaps]
+        weighted_shortfall = (
+            float(np.average([gap for gap, _ in valid_gaps], weights=[weight for _, weight in valid_gaps]))
+            if valid_gaps and sum(weight for _, weight in valid_gaps) > 0 else np.nan
+        )
         missing = max(0, slots - len(starters))
         low = int((~starters.minutes.ge(minimum_minutes)).sum())
         review_names = [r["player_name"] for r in players if r["role_group"] == role and r["starter"] and r["review"] == "Review profile fit"]
+        learned_outcomes = ", ".join(sorted({str(p.get("learned_outcome", "")) for p in group_profiles if p.get("learned_outcome")}))
         priorities.append({"role_group": role, "position": ROLE_LABELS[role], "focus": focus,
+                           "learned_outcomes": learned_outcomes,
                            "unfilled_starter_slots": missing, "low_minutes_starters": low,
                            "average_percentile_shortfall": float(np.mean(gaps)) if gaps else np.nan,
+                           "weighted_percentile_shortfall": weighted_shortfall,
                            "review_players": ", ".join(review_names), "supported_metrics": len(group_profiles),
                            "next_step": "Assign a starter or scout cover" if missing else
                            "Gather more playing evidence" if low or not gaps else
                            "Compare potential upgrades" if review_names else "Lower recruitment priority"})
     priorities = pd.DataFrame(priorities).sort_values(
-        ["unfilled_starter_slots", "average_percentile_shortfall"], ascending=[False, False], na_position="last")
+        ["unfilled_starter_slots", "weighted_percentile_shortfall"], ascending=[False, False], na_position="last")
     return priorities.reset_index(drop=True), pd.DataFrame(profiles), pd.DataFrame(players)
 
 
@@ -258,21 +332,36 @@ def compare_targets(targets, squad, profile, role, *, minimum_minutes=900, leagu
     rows, details = [], []
     combined = pd.concat([squad.assign(source="My squad"),
                           targets[~targets.player_key.isin(squad.player_key)].assign(source="Target")], ignore_index=True)
+    profile_records = profile.to_dict("records")
+    total_profile_weight = sum(float(p.get("importance_weight", 1.0)) for p in profile_records)
+    if total_profile_weight <= 0:
+        total_profile_weight = float(len(profile_records))
+        for p in profile_records:
+            p["importance_weight"] = 1.0
+
     for _, player in combined[combined.role_group.eq(role)].iterrows():
         seen, passed = 0, 0
-        for p in profile.to_dict("records"):
+        passed_weight = 0.0
+        for p in profile_records:
             value = player.get(p["metric"], np.nan)
-            met = bool(value >= p["screening_target"]) if pd.notna(value) else None
+            if pd.notna(value):
+                met = bool(value >= p["screening_target"]) if p.get("direction", "higher") == "higher" else bool(value <= p["screening_target"])
+            else:
+                met = None
             seen += int(pd.notna(value))
             passed += int(met is True)
+            if met is True:
+                passed_weight += float(p.get("importance_weight", 1.0))
             details.append({"player_key": player.player_key, "player_name": player.player_name,
                             "metric": p["metric"], "value": value,
+                            "direction": p.get("direction", "higher"),
+                            "importance_weight": p.get("importance_weight", np.nan),
                             "screening_target": p["screening_target"], "meets_target": met})
         other_league = league is not None and normal(player.get("league", "")) != normal(league)
         rows.append({"player_key": player.player_key, "player_name": player.player_name,
                      "club": player.team_id, "source": player.source, "minutes": player.minutes,
-                     "metrics_met": passed, "metrics_observed": seen, "metrics_required": len(profile),
-                     "profile_match_pct": 100 * passed / len(profile),
+                     "metrics_met": passed, "metrics_observed": seen, "metrics_required": len(profile_records),
+                     "profile_match_pct": 100 * passed_weight / total_profile_weight,
                      "sufficient_minutes": bool(pd.notna(player.minutes) and player.minutes >= minimum_minutes),
                      "evidence": "Insufficient minutes" if pd.isna(player.minutes) or player.minutes < minimum_minutes else
                      "Unadjusted cross-league comparison" if other_league else
