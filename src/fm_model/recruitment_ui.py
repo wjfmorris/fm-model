@@ -11,10 +11,10 @@ from .app_support import clone_upload, frame_to_csv_bytes, load_example_frames, 
 from .data import read_table, season_number
 from .errors import DataError
 from .pipeline import MoneyballModel
-from .roles import FORMATION_PRESETS, ROLE_LABELS
+from .roles import FORMATION_PRESETS, INTENDED_POSITION_OPTIONS, ROLE_LABELS
 from .metric_learning import learn_metric_importance, metric_inventory, select_learned_metrics
 from .recruitment import (
-    COST_FIELDS, assess_squad, available_metrics, clean_statistics,
+    COST_FIELDS, apply_intended_positions, assess_squad, available_metrics, clean_statistics,
     compare_targets, cost_comparison, default_assignments, empty_costs, merge_costs,
     normal, prepare_inputs, replacement_cost,
 )
@@ -180,21 +180,43 @@ def render_assessment(work):
         help="The strongest out-of-sample, non-redundant metrics are selected. They are not treated as equally important.",
     )
     st.caption(
-        "Starting assignments use the most-played players in each broad position group. "
-        "Edit multifunctional players and confirm your intended starters."
+        "Choose the exact position you intend to use each player in. The statistical model then maps that "
+        "choice to a broader position group only where it needs more sample size."
     )
     revision = work["revision"]
+    defaults = default_assignments(work["squad"], formation)
+    editor_columns = [
+        c for c in (
+            "player_key", "player_name", "position", "listed_positions",
+            "intended_position", "minutes", "starter",
+        ) if c in defaults.columns
+    ]
     assignment = st.data_editor(
-        default_assignments(work["squad"], formation),
+        defaults[editor_columns],
         hide_index=True, width="stretch",
-        disabled=["player_key", "player_name", "position", "minutes"],
+        disabled=["player_key", "player_name", "position", "listed_positions", "minutes"],
         column_config={
             "player_key": None,
-            "role_group": st.column_config.SelectboxColumn("Intended position group", options=list(ROLE_LABELS), required=True),
+            "position": st.column_config.TextColumn("FM positions"),
+            "listed_positions": st.column_config.TextColumn(
+                "Parsed positions",
+                help="Exact positions recognised from the FM/FMST position string.",
+            ),
+            "intended_position": st.column_config.SelectboxColumn(
+                "Intended position",
+                options=list(INTENDED_POSITION_OPTIONS),
+                required=True,
+                help="Set the actual position you plan to use this player in. This drives the model position group.",
+            ),
             "starter": st.column_config.CheckboxColumn("Intended starter", required=True),
         },
         key=f"assignments_{revision}_{formation}",
     )
+    try:
+        assignment = apply_intended_positions(assignment)
+    except DataError as exc:
+        st.error(str(exc))
+        return None
 
     try:
         ranking = learn_metric_importance(
