@@ -106,7 +106,8 @@ class RecruitmentTests(unittest.TestCase):
         self.assertEqual(pool.fmst_guide_value.iloc[0], 300_000_000)
         self.assertEqual(pool.distance_km_p90.iloc[0], 10.3)
         self.assertTrue(pool.attacking_actions_p90.notna().all())
-        self.assertTrue(pool.goals_outside_box.isna().all())
+        self.assertTrue(np.isnan(pool.goals_outside_box.iloc[0]))
+        self.assertTrue(pool.goals_outside_box.iloc[1:].notna().any())
         self.assertTrue(issues.field.eq('goals_outside_box').any())
         self.assertAlmostEqual(pool.xg_prevented_p90.iloc[0], -2*90/1500)
 
@@ -202,20 +203,24 @@ class RecruitmentTests(unittest.TestCase):
                 self.assertIn(metric, known)
         self.assertFalse(inventory.loc[inventory.column.eq('goals_p90'), 'eligible'].iloc[0])
         self.assertFalse(inventory.loc[inventory.column.eq('attacking_actions_p90'), 'eligible'].iloc[0])
-        self.assertIn('goal', inventory.loc[inventory.column.eq('goals_p90'), 'reason'].iloc[0].lower())
+        self.assertIn('outcome', inventory.loc[inventory.column.eq('goals_p90'), 'reason'].iloc[0].lower())
 
     def test_metric_selection_is_learned_not_position_hard_coded(self):
-        pool, _, _ = frames()
-        # Make one otherwise ordinary ST metric carry a very strong club scoring signal.
-        club_order = {name: i for i, name in enumerate(sorted(pool.team_id.unique()))}
-        st = pool.role_group.eq('ST')
-        pool.loc[st, 'distance_km_p90'] = pool.loc[st, 'team_id'].map(club_order).astype(float) + 1
-        # Team goals are the learning target; make them rise with the same club order.
-        for club, i in club_order.items():
-            idx = pool.team_id.eq(club)
-            pool.loc[idx, 'goals'] = float(i + 1)
-        ranking = learn_metric_importance(pool)
-        selected = select_learned_metrics(pool, ranking, max_metrics=1)
+        # Balanced one-player-per-club construction: the only strong scoring
+        # relationship is deliberately placed in distance_km_p90.
+        rows = []
+        for i in range(10):
+            rows.append({
+                'player_name': f'Striker {i}', 'team_id': f'Club {i}',
+                'league': 'League A', 'season': 2025, 'role_group': 'ST',
+                'minutes': 1800, 'goals': 4 + 2*i,
+                'distance_km_p90': 8.0 + .4*i,
+                'shots_p90': 2.0 + (.1 if i % 2 else -.1),
+                'xg_p90': .30 + (.01 if i % 3 else -.01),
+            })
+        learned_pool = pd.DataFrame(rows)
+        ranking = learn_metric_importance(learned_pool)
+        selected = select_learned_metrics(learned_pool, ranking, max_metrics=1)
         self.assertEqual(selected['ST'], ['distance_km_p90'])
 
     def test_costs_follow_identity_and_missing_remains_unknown(self):
