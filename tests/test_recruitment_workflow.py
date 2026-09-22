@@ -14,7 +14,8 @@ from fm_model.recruitment import (
     default_assignments, empty_costs, identify, merge_costs, prepare_inputs, replacement_cost,
 )
 from fm_model.metric_learning import (
-    available_metrics, learn_metric_importance, metric_inventory, select_learned_metrics,
+    available_metrics, learn_metric_importance, metric_inventory, role_outcomes,
+    select_learned_metrics,
 )
 
 
@@ -176,7 +177,8 @@ class RecruitmentTests(unittest.TestCase):
         self.assertFalse(st_profile.empty)
         self.assertTrue(st_profile.importance_score.notna().all())
         self.assertAlmostEqual(float(st_profile.importance_weight.sum()), 1.0)
-        self.assertTrue(st_profile.learned_outcome.isin(['scoring', 'preventing goals']).all())
+        self.assertTrue(st_profile.learned_outcome.eq('scoring').all())
+        self.assertTrue(st_profile.tested_outcomes.eq('scoring').all())
 
         target = pool[~pool.owned & pool.role_group.eq('ST')].copy()
         first, _ = compare_targets(target, squad, profile, 'ST', league='League A')
@@ -263,6 +265,21 @@ class RecruitmentTests(unittest.TestCase):
         cleaned, _ = clean_statistics(raw)
         self.assertIn('brand_new_fmst_metric_per_90', cleaned.columns)
         self.assertIn('brand_new_fmst_metric_per_90', available_metrics(cleaned))
+
+    def test_metric_learning_uses_only_role_relevant_outcomes(self):
+        self.assertEqual(role_outcomes("ST"), ("scoring",))
+        self.assertEqual(role_outcomes("AM_W"), ("scoring",))
+        self.assertEqual(role_outcomes("CB"), ("preventing goals",))
+        self.assertEqual(role_outcomes("GK"), ("preventing goals",))
+        self.assertEqual(role_outcomes("FB_WB"), ("scoring", "preventing goals"))
+        self.assertEqual(role_outcomes("CM_DM"), ("scoring", "preventing goals"))
+
+        pool, _, _ = frames()
+        ranking = learn_metric_importance(pool)
+        self.assertTrue(ranking[ranking.role_group.eq("ST")].learned_outcome.eq("scoring").all())
+        self.assertTrue(ranking[ranking.role_group.eq("AM_W")].learned_outcome.eq("scoring").all())
+        self.assertTrue(ranking[ranking.role_group.eq("CB")].learned_outcome.eq("preventing goals").all())
+        self.assertTrue(ranking[ranking.role_group.eq("GK")].learned_outcome.eq("preventing goals").all())
 
     def test_metric_selection_is_learned_not_position_hard_coded(self):
         # Balanced one-player-per-club construction: the only strong scoring
