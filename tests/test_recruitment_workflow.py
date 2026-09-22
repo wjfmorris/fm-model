@@ -24,7 +24,7 @@ def export():
                            ('CM_DM', 'DM'), ('AM_W', 'AM (L)'), ('ST', 'ST')]:
         for i in range(10):
             rows.append({
-                'Name': f'{role} Player {i}', 'Position': position,
+                'index': i, 'Name': f'{role} Player {i}', 'Position': position,
                 'Club': 'My Club' if i < 3 else f'Club {i}',
                 'Appearances': 22, 'Minutes Played': 1500 + 30*i,
                 'Goals': i, 'Goals per 90': .02 + .03*i, 'xG per 90': .08 + .035*i,
@@ -106,8 +106,7 @@ class RecruitmentTests(unittest.TestCase):
         self.assertEqual(pool.fmst_guide_value.iloc[0], 300_000_000)
         self.assertEqual(pool.distance_km_p90.iloc[0], 9.5)
         self.assertTrue(pool.attacking_actions_p90.notna().all())
-        self.assertTrue(np.isnan(pool.goals_outside_box.iloc[0]))
-        self.assertTrue(pool.goals_outside_box.iloc[1:].notna().any())
+        self.assertTrue(pool.goals_outside_box.notna().any())
         self.assertTrue(issues.field.eq('goals_outside_box').any())
         self.assertAlmostEqual(pool.xg_prevented_p90.iloc[0], -2*90/1500)
 
@@ -211,6 +210,7 @@ class RecruitmentTests(unittest.TestCase):
         }
         self.assertTrue(expected.issubset(known), sorted(expected - known))
         eligibility = inventory.set_index('column').eligible.to_dict()
+        self.assertFalse(eligibility['index'])
         self.assertFalse(eligibility['goals_p90'])
         self.assertFalse(eligibility['goals_conceded_p90'])
         self.assertFalse(eligibility['clean_sheets_p90'])
