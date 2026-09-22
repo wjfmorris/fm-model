@@ -61,3 +61,109 @@ def formation_slots(name: str) -> dict[str, int]:
     if name not in FORMATION_PRESETS:
         raise ValueError(f"Unknown formation {name!r}.")
     return dict(FORMATION_PRESETS[name])
+
+
+# Exact tactical positions shown to the user. These are intentionally more
+# specific than the modelling groups above; the statistical model still pools
+# positions where sample sizes would otherwise be too small.
+INTENDED_POSITION_TO_ROLE = {
+    "GK": "GK",
+    "DL": "FB_WB",
+    "DR": "FB_WB",
+    "WBL": "FB_WB",
+    "WBR": "FB_WB",
+    "DC": "CB",
+    "DM": "CM_DM",
+    "MC": "CM_DM",
+    "ML": "AM_W",
+    "MR": "AM_W",
+    "AML": "AM_W",
+    "AMC": "AM_W",
+    "AMR": "AM_W",
+    "ST": "ST",
+}
+INTENDED_POSITION_OPTIONS = tuple(INTENDED_POSITION_TO_ROLE)
+
+
+def intended_position_role(value: str) -> str:
+    """Map an exact intended position back to the broad modelling group."""
+
+    key = str(value or "").upper().strip()
+    if key not in INTENDED_POSITION_TO_ROLE:
+        raise ValueError(f"Unknown intended position {value!r}.")
+    return INTENDED_POSITION_TO_ROLE[key]
+
+
+def exact_positions(value) -> list[str]:
+    """Extract exact FM positions from labels such as M (L), AM (RL), ST."""
+
+    text = str(value or "").upper().strip()
+    if not text:
+        return []
+
+    result: list[str] = []
+
+    def add(position: str):
+        if position in INTENDED_POSITION_TO_ROLE and position not in result:
+            result.append(position)
+
+    if re.search(r"(^|[^A-Z])GK([^A-Z]|$)", text):
+        add("GK")
+
+    # FM may write D/WB (L), M/AM (RL), D (LC), AM (RLC), etc.
+    for match in re.finditer(r"((?:D|WB|M|AM)(?:/(?:D|WB|M|AM))*)\s*\(([RLC]+)\)", text):
+        families = match.group(1).split("/")
+        sides = match.group(2)
+        for family in families:
+            for side in sides:
+                if family == "D":
+                    add("DC" if side == "C" else f"D{side}")
+                elif family == "WB" and side in {"L", "R"}:
+                    add(f"WB{side}")
+                elif family == "M":
+                    add("MC" if side == "C" else f"M{side}")
+                elif family == "AM":
+                    add(f"AM{side}")
+
+    compact = re.sub(r"[^A-Z0-9]+", " ", text)
+    tokens = compact.split()
+    aliases = {
+        "DC": "DC", "CB": "DC",
+        "DL": "DL", "LB": "DL",
+        "DR": "DR", "RB": "DR",
+        "WBL": "WBL", "WBR": "WBR",
+        "DM": "DM", "DMC": "DM",
+        "MC": "MC", "CM": "MC",
+        "ML": "ML", "MR": "MR",
+        "AML": "AML", "AMC": "AMC", "AMR": "AMR",
+        "ST": "ST", "CF": "ST",
+    }
+    for token in tokens:
+        if token in aliases:
+            add(aliases[token])
+
+    if re.search(r"(^|[^A-Z])ST(?:\s*\(C\))?([^A-Z]|$)", text):
+        add("ST")
+
+    return result
+
+
+def suggest_intended_position(raw_position, role_group: str | None = None) -> str:
+    """Choose an editable exact-position default for a player."""
+
+    options = exact_positions(raw_position)
+    if role_group:
+        same_group = [p for p in options if INTENDED_POSITION_TO_ROLE[p] == role_group]
+        if same_group:
+            return same_group[0]
+    if options:
+        return options[0]
+    fallback = {
+        "GK": "GK",
+        "CB": "DC",
+        "FB_WB": "DL",
+        "CM_DM": "MC",
+        "AM_W": "AMC",
+        "ST": "ST",
+    }
+    return fallback.get(str(role_group or ""), "MC")
