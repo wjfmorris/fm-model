@@ -194,7 +194,10 @@ def render_assessment(work):
     assignment = st.data_editor(
         defaults[editor_columns],
         hide_index=True, width="stretch",
-        disabled=["player_key", "player_name", "position", "listed_positions", "minutes"],
+        disabled=[
+            c for c in ("player_key", "player_name", "position", "listed_positions", "minutes")
+            if c in editor_columns
+        ],
         column_config={
             "player_key": None,
             "position": st.column_config.TextColumn("FM positions"),
@@ -217,6 +220,11 @@ def render_assessment(work):
     except DataError as exc:
         st.error(str(exc))
         return None
+    st.caption(
+        "Exact intended positions are used for your lineup choices. For metric learning only, "
+        "they are pooled into Goalkeeper / Centre-back / Full-back-Wing-back / Central-Defensive midfield / "
+        "Attacking midfield-Wing / Striker groups to preserve sample size."
+    )
 
     try:
         ranking = learn_metric_importance(
