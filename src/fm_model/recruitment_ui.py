@@ -15,8 +15,8 @@ from .roles import FORMATION_PRESETS, INTENDED_POSITION_OPTIONS, ROLE_LABELS
 from .metric_learning import learn_metric_importance, metric_inventory, select_learned_metrics
 from .recruitment import (
     COST_FIELDS, apply_intended_positions, assess_squad, available_metrics, clean_statistics,
-    compare_targets, cost_comparison, default_assignments, empty_costs, merge_costs,
-    normal, prepare_inputs, replacement_cost,
+    compare_targets, cost_comparison, default_assignments, empty_costs, finish_target_percentile,
+    merge_costs, normal, prepare_inputs, replacement_cost,
 )
 
 FORMATS = ["csv", "tsv", "html", "htm", "xlsx", "xlsm"]
@@ -171,10 +171,30 @@ def render_assessment(work):
     st.subheader("Confirm your formation and player roles")
     formation = st.selectbox("Formation", list(FORMATION_PRESETS), key="guided_formation")
     minimum = st.number_input("Minimum minutes for a dependable player comparison", 90, 5000, 900, step=90, key="guided_minimum")
-    percentile = st.slider(
-        "Recruitment screening percentile", 25, 90, 60, step=5, key="guided_percentile",
-        help="After the model learns which metrics matter, this sets how strong a candidate should be relative to positional peers.",
+
+    league = str(work["pool"].league.iloc[0])
+    league_model = work["model"].league_model
+    if league_model is None:
+        st.error("A valid season-target model is required before recruitment thresholds can be calculated.")
+        return None
+    try:
+        context = league_model.context(league)
+    except DataError as exc:
+        st.error(str(exc))
+        return None
+    target_position = int(
+        st.session_state.get(
+            f"target_position_{league}",
+            min(6, int(context["n_teams"])),
+        )
     )
+    percentile = finish_target_percentile(target_position, int(context["n_teams"]))
+    st.metric("Recruitment benchmark", f"{percentile:.1f}th percentile")
+    st.caption(
+        f"Automatically derived from your season target: finish {target_position} of {int(context['n_teams'])}. "
+        "There is no separate recruitment-percentile setting."
+    )
+
     max_metrics = st.slider(
         "Learned metrics per position", 1, 8, 4, step=1, key="guided_learned_metric_count",
         help="The strongest out-of-sample, non-redundant metrics are selected. They are not treated as equally important.",
@@ -284,8 +304,8 @@ def render_assessment(work):
         priorities, profile, squad_review = assess_squad(
             work["pool"], work["squad"], assignment,
             formation=formation, minimum_minutes=minimum,
-            target_percentile=percentile, focuses=focuses,
-            metrics=metrics, metric_evidence=ranking,
+            target_position=target_position, n_teams=int(context["n_teams"]),
+            focuses=focuses, metrics=metrics, metric_evidence=ranking,
         )
     except DataError as exc:
         st.error(str(exc))
@@ -294,8 +314,8 @@ def render_assessment(work):
     st.subheader("Where to look for improvements")
     st.dataframe(display_frame(priorities), hide_index=True, width="stretch")
     st.caption(
-        "Priority order uses missing starters first, then an importance-weighted percentile shortfall. "
-        "Metrics with stronger held-out evidence count more than marginal ones."
+        "Position changes are ordered from least important to most important. "
+        "The ordering uses missing starters and the importance-weighted shortfall from the season-target benchmark."
     )
     st.subheader("Your players")
     st.dataframe(display_frame(squad_review), hide_index=True, width="stretch")
