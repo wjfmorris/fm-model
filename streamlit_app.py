@@ -560,6 +560,11 @@ def render_target():
             key="custom_next_season",
         )
 
+    signature = (league, int(target_position), float(probability), matches, n_teams, next_season)
+    if st.session_state.get("guided_target_signature") != signature:
+        st.session_state.pop(SCENARIO_KEY, None)
+        st.session_state["guided_target_signature"] = signature
+
     if st.button("Calculate target", type="primary", key="calculate_target"):
         try:
             with st.spinner("Searching the non-dominated goal frontier..."):
@@ -1401,27 +1406,31 @@ def render_diagnostics():
     )
 
 
-render_sidebar()
-render_header()
+if st.sidebar.checkbox("Advanced research dashboard", value=False, key="advanced_mode"):
+    render_sidebar()
+    render_header()
 
-setup_tab, plan_tab, target_tab, drivers_tab, recruitment_tab, diagnostics_tab = st.tabs(
-    ["Data collection & setup", "Complete squad plan", "Season target", "Goal drivers", "Recruitment", "Diagnostics"]
-)
+    setup_tab, plan_tab, target_tab, drivers_tab, recruitment_tab, diagnostics_tab = st.tabs(
+        ["Data collection & setup", "Complete squad plan", "Season target", "Goal drivers", "Recruitment", "Diagnostics"]
+    )
 
-with setup_tab:
-    render_setup()
-with plan_tab:
-    render_squad_plan()
-with target_tab:
-    render_target()
-with drivers_tab:
-    render_drivers()
-with recruitment_tab:
-    render_recruitment()
-with diagnostics_tab:
-    render_diagnostics()
+    with setup_tab:
+        render_setup()
+    with plan_tab:
+        render_squad_plan()
+    with target_tab:
+        render_target()
+    with drivers_tab:
+        render_drivers()
+    with recruitment_tab:
+        render_recruitment()
+    with diagnostics_tab:
+        render_diagnostics()
 
-st.divider()
-st.caption(
-    "FM26 Moneyball Recruitment Lab · The app keeps modelling logic in the fm_model package so the statistical backend can be tested independently."
-)
+    st.divider()
+    st.caption(
+        "FM26 Moneyball Recruitment Lab · The app keeps modelling logic in the fm_model package so the statistical backend can be tested independently."
+    )
+else:
+    from fm_model.recruitment_ui import render_workflow
+    render_workflow(render_target)

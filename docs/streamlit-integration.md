@@ -14,31 +14,34 @@ Dependencies are installed from `requirements.txt`.
 
 ## App workflow
 
-The standard path uses **Season target** and **Recruitment**:
+The default entry point calls `fm_model.recruitment_ui.render_workflow`. It provides five tabs:
 
-1. Upload several completed league-table seasons.
-2. Upload the current squad and market statistics for one recent season.
-3. Set the player statistics season start year and club. No team metrics are required.
-4. Build available layers and inspect input diagnostics.
-5. Use league GF/GA targets and descriptive player/price comparisons.
+1. Import checks: league-table history, league player statistics, own squad.
+2. Season target: a GF/GA frontier and explicitly historical club actuals.
+3. Squad assessment: editable roles/starters, purpose-specific descriptive profiles.
+4. Potential signings: subsequent CSV uploads against fixed league thresholds.
+5. Costs & replacements: editable wages/fees, CSV persistence and joint profile/cost comparison.
 
-Additional player files and team history live under Optional additional data. Without a team-goal model, the complete squad forecast remains unavailable and the UI explains why. It never manufactures team metrics by summing player statistics or invents another season from duplicate uploads.
+`fm_model.recruitment` owns identity matching, data exclusions, empirical profiles,
+candidate comparisons and cost arithmetic. See [the upload contract](fmst26-uploads.md)
+for units, formulas, validation and evidence limits. A bad league table disables only
+the league model; it does not silently discard seasons or block player assessment.
 
-A bad league table is reported with its actual GF/GA totals. The app can still load player comparisons, while the invalid league layer stays unavailable. Library callers remain strict by default; only the UI explicitly opts into `build_model(..., allow_partial=True)`.
+The **Advanced research dashboard** checkbox retains the previous team-driver,
+attribute-history and squad-planning interfaces for richer compatible datasets.
+The guided workflow does not pretend to fit those layers from player totals.
 
-## Upload handling
+Upload parsing supports CSV, TSV, HTML and XLSX. Original parsed frames remain
+separate from cleaned analysis frames. Each player file covers one season; candidate
+context must match that season. Club spelling is confirmed explicitly rather than
+silently fuzzy-matched. Guide Value is isolated from all financial calculations.
 
-The app supports multiple historical files. A file may contain its own `season` column, or the season can be inferred from a filename such as:
-
-```text
-league_2024_25.csv
-team_2024_25.csv
-players_2024_25.csv
-```
-
-Both player uploads can omit league/season when that context is supplied in the sidebar. A filename such as `player_history.csv` does not mean it contains multiple seasons. Ownership can come from an `owned` column or be inferred from the user's club.
-
-Displayed money ranges are never silently averaged. The user explicitly chooses lower, midpoint, upper or error handling.
+Guided state stores a transactional assessment and a separate candidate pool.
+Refreshing the three-file assessment clears candidates and stale target scenarios;
+manual costs are kept by save/league/club namespace and stable player identity.
+Targets also invalidate when finish/probability/context changes. Financial edits
+need CSV download/restore to survive session resets; no shared server persistence
+is implied. Optional advanced model state remains independent of the guided model.
 
 ## Data layers
 
@@ -81,4 +84,4 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-Automated tests boot the Streamlit app headlessly and exercise the synthetic end-to-end squad-plan workflow.
+Automated tests boot the Streamlit app headlessly, exercise the guided uploads/targets/finance-restore flow, verify stale-target invalidation and retain the advanced synthetic squad-plan regression test.

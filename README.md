@@ -4,17 +4,19 @@ A Football Manager 26 tool for league goal targets and player/price comparisons,
 
 ## What the model does
 
-The standard upload workflow is:
+The default app follows the three-file recruitment workflow:
 
-1. Upload completed league tables covering several seasons.
-2. Upload one FMST26 player file covering the most recent season. Select its season start year and your club in the sidebar.
-3. Build the available layers, review import diagnostics, and use **Season target** and **Recruitment**.
+1. Upload **league table history**, **league player statistics** and **my squad**.
+2. Calculate a target finish's GF/GA combinations, then confirm formation, player roles and starters.
+3. Review squad shortfalls and league-derived screening thresholds.
+4. Upload **potential signings** later and compare them against the same fixed benchmarks.
+5. Manually enter wages, achievable fees and contract assumptions for your squad and shortlisted targets. Compare football profiles alongside total costs and replacement-versus-keeping scenarios.
 
-A separate team-metrics file is **not required**. `player_history.csv` is optional and may cover the same recent season. Its missing season uses the sidebar setting; explicit season columns or dated filenames take priority. Repeating the same player observations never creates another historical season.
+No team-metrics file, wages for the entire league or duplicate `player_history.csv` is required. All player files normally cover one recent season; league tables cover several. **Guide Value is reference-only and excluded from financial valuation.** Financial edits persist in the session; download and restore their CSV between visits. See the [full upload and calculation contract](docs/fmst26-uploads.md).
 
-With these inputs, league targets and descriptive player/price comparisons work independently. The existing player comparison uses statistical proxies when no team-goal model exists. It does **not** establish which stats cause goals, forecast goals added by signings, or learn attribute effects from a statistics-only export. BUY/SELL labels in this mode are review candidates with `descriptive_proxy` confidence. See [FMST26 upload contract](docs/fmst26-uploads.md).
+Recruitment focus menus are editable scouting choices. Their thresholds come from eligible positional peers; they are **descriptive benchmarks, not learned goal-impact weights**. The app does not turn one-season player comparisons into exact next-season GF/GA or transfer goal gains. Missing costs remain unknown. Candidate uploads cannot change the reference benchmark.
 
-The optional research workflow retains team goal-driver models and complete squad planning for datasets that support them. These features require team outcomes/process data; validated attribute models also require attributes and multiple player seasons. They remain unavailable when that evidence is absent.
+The **Advanced research dashboard** checkbox retains team goal-driver models and complete squad planning for datasets that support them. These features require team outcomes/process data; validated attribute models also require attributes and multiple player seasons. They remain unavailable when that evidence is absent.
 
 The app deliberately keeps **CA, PA, reputation and price out of the football-performance models**. Price/wage information is only used after football contribution has been estimated, so the model can search for market inefficiencies instead of reproducing FM's hidden ability ratings.
 
@@ -38,6 +40,8 @@ fm-model/
 │       ├── outcomes.py
 │       ├── pipeline.py
 │       ├── planning.py
+│       ├── recruitment.py
+│       ├── recruitment_ui.py
 │       ├── players.py
 │       └── roles.py
 ├── tests/

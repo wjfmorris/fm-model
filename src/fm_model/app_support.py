@@ -29,7 +29,7 @@ PLAYER_NUMERIC_COLUMNS = (
     | set(RAW_COUNT_METRICS)
     | set(PRICE_COLUMNS)
     | set(WAGE_COLUMNS)
-    | {"minutes", "age", "contract_months", "reputation", "expected_minutes"}
+    | {"minutes", "age", "contract_months", "reputation", "expected_minutes", "fmst_guide_value"}
 )
 
 OWNERSHIP_MODES = {
@@ -223,8 +223,9 @@ def player_upload_report(frame):
             n = int((frame[completed] > frame[attempted]).sum())
             if n:
                 warnings.append(f"{n} rows have {completed} greater than {attempted}; check the export. Values were retained.")
-    if "market_value" in frame:
-        counts = frame.market_value.dropna().value_counts()
+    if "fmst_guide_value" in frame:
+        warnings.append("FMST Guide Value is retained for reference only and excluded from financial valuation.")
+        counts = frame.fmst_guide_value.dropna().value_counts()
         if len(counts) and counts.iloc[0] >= max(5, len(frame) * 0.03):
             warnings.append(f"{int(counts.iloc[0])} players share guide value {counts.index[0]:,.0f}. Check repeated/capped values before acting on prices.")
     if not any(c in frame for c in WAGE_COLUMNS):

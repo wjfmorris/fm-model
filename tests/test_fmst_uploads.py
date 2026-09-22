@@ -61,7 +61,7 @@ class FMSTUploadTests(unittest.TestCase):
         self.assertEqual(frame.loc[0, 'non_penalty_xg_p90'], .26)
         self.assertEqual(frame.loc[0, 'shot_accuracy_pct'], 39.7)
         self.assertEqual(frame.loc[0, 'xg_overperformance'], -2.07)
-        self.assertEqual(frame.loc[0, 'market_value'], 1_100_000)
+        self.assertEqual(frame.loc[0, 'fmst_guide_value'], 1_100_000)
         self.assertTrue(np.isnan(frame.loc[0, 'save_pct']))
         self.assertEqual(int(frame.owned.sum()), 3)
         self.assertEqual(frame.loc[0, 'position'], 'M (RC), AM (RLC), ST')

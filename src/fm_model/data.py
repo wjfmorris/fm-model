@@ -21,7 +21,7 @@ ALIASES = {
     "uid": "player_id", "unique_id": "player_id", "name": "player_name", "player": "player_name",
     "player_name": "player_name", "age": "age", "club_name": "team_id", "team_id": "team_id",
     "league_name": "league", "league": "league", "season": "season", "year": "season",
-    "value": "market_value", "guide_value": "market_value", "market_value": "market_value",
+    "value": "market_value", "guide_value": "fmst_guide_value", "market_value": "market_value",
     "transfer_value": "transfer_value", "asking_price": "asking_price",
     "fee": "transfer_fee", "transfer_fee": "transfer_fee", "wage": "wage", "weekly_wage": "weekly_wage",
     "annual_wage": "annual_wage", "contract_months": "contract_months", "reputation": "reputation",
@@ -46,6 +46,15 @@ ALIASES = {
 # Keep ambiguous event labels distinct (CCC, tackles and pressures) rather than
 # silently treating them as a different statistic.
 FMST_STAT_COLUMNS = {
+    "appearances": "appearances", "goals_outside_box": "goals_outside_box",
+    "distance_per_90_(km)": "distance_km_p90", "sprints_per_90": "sprints_p90",
+    "clean_sheets_per_90": "clean_sheets_p90",
+    "goal_contributions_per_90": "goal_contributions_p90",
+    "non_penalty_contributions_per_90": "non_penalty_contributions_p90",
+    "defensive_actions_per_90": "defensive_actions_p90",
+    "attacking_actions_per_90": "attacking_actions_p90",
+    "creative_actions_per_90": "creative_actions_p90",
+    "goalkeeping_actions_per_90": "goalkeeping_actions_p90",
     "goals_per_90": "goals_p90", "xg_per_90": "xg_p90",
     "xa_per_90": "xa_p90", "np_xg_per_90": "non_penalty_xg_p90",
     "xg_overperformance": "xg_overperformance", "shots_per_90": "shots_p90",

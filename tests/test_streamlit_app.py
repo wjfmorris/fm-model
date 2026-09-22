@@ -17,6 +17,7 @@ class StreamlitAppTests(unittest.TestCase):
 
     def test_example_data_runs_full_dashboard_and_target(self):
         at = AppTest.from_file(APP, default_timeout=90).run()
+        at.checkbox(key="advanced_mode").check().run()
         at.button(key="load_examples").click().run(timeout=90)
         self.assertFalse(at.exception)
         self.assertGreaterEqual(len(at.metric), 4)

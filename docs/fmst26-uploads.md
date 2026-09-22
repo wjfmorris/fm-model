@@ -1,37 +1,111 @@
-# FMST26 upload contract
+# FMST26 guided recruitment workflow
 
-The standard inputs are multi-season completed league tables and one recent-season player export. Team metrics are optional and not part of the required workflow.
+## Start with three files
 
-## Display formats
+| Upload | Contents | Use |
+| --- | --- | --- |
+| League table history | Complete tables from multiple seasons: league, season, position, club, matches, GF, GA, points | League-specific GF/GA target frontier |
+| League player statistics | Broad player pool for one recent season | Fixed positional reference distributions |
+| My squad | Your club's players for that same season | Ownership, starting assignments and recruitment needs |
 
-The 54-column FMST26 statistics view is supported unchanged: three identity columns (`Name`, `Position`, `Club`) and 51 numeric columns. The importer maps displayed headings to canonical fields and retains all input fields. Recognising a column does not mean the present scoring model uses it.
+File names are not significant. The supplied 52-column FMST view and earlier
+54-column view are recognised. Select the statistics season start year (2025 for
+2025/26) and competition scope in the sidebar. League is inferred from a single
+league in the tables, or supplied explicitly. Explicit player seasons take priority;
+mixed player seasons or mismatched squad/pool seasons are rejected.
 
-| Display | Interpretation |
-| --- | --- |
-| `Guide Value`: `£1.1M`, `£946K` | 1,100,000 and 946,000 in the source currency; not an asking price |
-| `'-£1` | Missing value |
-| `xG Overperformance`: `'-2.07` | Signed number -2.07 |
-| `Shot Accuracy %`: `39.7%` | 39.7 on a 0–100 percentage scale |
-| `xG per 90`, `NP-xG per 90`, `Shots per 90` | Already rates; never divide these by minutes again |
-| `Goals`, `Assists`, `Headers Won`, `xG Prevented` | Totals; derive recognised per-90 metrics only when the rate is absent and minutes are available |
-| Blank goalkeeper statistics for outfield players | Missing, not zero |
-| `M (RC), AM (RLC), ST` | Original position text retained; broad comparison role inferred using the existing position priority |
+Squad rows are identified by normalised name and club, never appended to the league
+pool. Exact repeated rows are deduplicated; conflicting identities are rejected.
+Changing club/name requires reviewing identity and re-entering or rematching costs.
+No fuzzy player matching is performed.
 
-CCC and tackles retain distinct canonical fields rather than being silently relabelled as another event. All currency values must use a consistent currency; no currency conversion is performed.
+## Assess first, then upload targets
 
-## Season and ownership
+1. Import the three files and inspect source issues.
+2. Calculate the finishing-position GF/GA frontier. Pairs are joint alternatives,
+   not two independently guaranteed cut-offs. Latest club actuals are labelled as
+   historical data, not next-season forecasts. Confirm club spelling explicitly.
+3. Select formation; edit inferred broad position groups and intended starters.
+   Each player occupies one group. Missing starters flag a gap; excess starters
+   for the chosen formation must be corrected.
+4. Choose recruitment purposes and, if needed, screening metrics. Defaults are
+   explicit scouting menus, **not learned importance weights**. Percentile
+   thresholds are computed from positional league peers above the minimum minutes.
+   A metric needs at least five eligible peers and more than one distinct value.
+5. Review individual profile shortfalls and download the recruitment profiles.
+6. Upload candidate exports later. Add one league at a time when league is absent
+   from the CSV. Re-uploading updates an existing candidate; owned players are
+   excluded. Confirm the candidate's comparison position.
+7. Enter costs and compare an outgoing player with a candidate in that position.
 
-Set **Player statistics season (start year)** to the season the figures describe: 2025 for 2025/26. This supplies missing context to both player files. An explicit year or dated history filename takes priority. Identical additional history files are deduplicated. Identical current and history uploads are used in their respective roles, not appended into a larger training sample.
+Priorities sort by unfilled starting slots, then the mean positive percentile
+shortfall across supported metrics. Individual reviews show the number of
+thresholds met, observed and required. Profile match is the fraction of thresholds
+met. It is not a learned football-value score; missing fields are not successes.
+Low/unknown minutes are flagged and placed after candidates with adequate minutes.
+Cross-league output is explicitly unadjusted; the app does not invent league-strength
+factors. Defensive activity is context-dependent and does not measure goals prevented.
 
-Use the exact exported club name to infer owned players, or supply an `owned` column. The standard workflow needs only `player_export.csv`; uploading the same data as `player_history.csv` adds no information.
+The league target percentile and the recruitment screening percentile are separate:
+there is no validated mapping from a league finish to player-stat thresholds here.
+Candidate uploads never refit or move the original league benchmarks.
 
-## Diagnostics and evidence limits
+## Manual costs and persistence
 
-- Completed league tables must include every position and have equal total GF and GA. An invalid table disables league targets with a specific error, while player analysis can still load. Source values are never silently repaired or seasons omitted.
-- Report completed crosses/headers exceeding attempts and unusually repeated guide prices for review. These values are retained; warnings do not prove which value is wrong.
-- No attributes in the file means no attribute-learning result. No wages means price comparisons exclude employment costs.
-- One player season supports descriptive comparisons. It does not supply a held-out future season for the historical attribute models.
-- No team metrics means no learned team goal drivers or transfer goal forecast. Player proxy rankings are explicitly labelled. Defensive event volumes alone do not measure goals prevented.
-- Real club identifiers in league tables are required for any future club-level joins; template IDs such as `example-2023-1` do not match exported club names.
+Owned players need current weekly wage, remaining contract years, realistic sale
+proceeds and any additional future costs. Targets need expected wage demand, total
+purchase fee including instalments, proposed contract years and additional fees
+(agent/signing costs and expected bonuses). Use the notes column for estimates or
+renewal assumptions. Blank means unknown; explicitly enter 0 for genuinely zero fees.
 
-The supplied format has regression tests using synthetic players. Private save exports are not included in the repository.
+For horizon H years, the app uses:
+
+- Target cost = purchase fee + weekly wage × 52 × H + additional fees.
+- Keeping cost = weekly wage × 52 × H + additional future fees (original acquisition
+  fees are sunk).
+- Extra replacement cost = target cost − sale proceeds − keeping cost.
+
+Contracts must cover the selected horizon. Choose a shorter horizon or record an
+explicit renewal assumption otherwise. Currency is explicit; mixed-currency rows
+cannot produce a comparable total. No speculative resale proceeds are included.
+Budget timing/instalment schedules are not modelled by this total-cost comparison.
+
+Save edits with **Save financial entries**. They persist during the session and
+through assessment refreshes for the same save label, league and club. **Download
+financial entries** to keep them across browser/session resets; restore the CSV
+on the next visit. Keys rather than row order join restored prices. Use different
+save labels for different careers and restore only that career's finance file.
+The app does not write private data into GitHub or a shared server database.
+
+## Units and source checks
+
+- `Guide Value` maps to `fmst_guide_value`, reference only. It is never an asking
+  price, a fair-price training label or an input to financial recommendations.
+- `£1.1M` parses as 1,100,000; `'-£1` is missing. Signed `'-2.07` is -2.07.
+- Percentage fields stay on the displayed 0–100 scale. Missing GK fields stay missing.
+- Per-90 fields remain rates. Total xG prevented is divided by minutes/90 only if
+  its rate is absent. This assumes the total and minutes cover the same scope.
+- Appearances, distance in km/90, sprints/90, clean sheets/90 and composite action
+  headings are recognised. Recognition does not imply use in a model.
+- Outside-box goals and undocumented composite action scores are excluded from
+  the analysis copy. Outside-box goals greater than total goals are reported.
+- Impossible percentages and negative non-signed statistics are excluded from
+  analysis, with issues shown. Negative xG prevented is valid.
+- Completed crosses/headers exceeding attempts are reported and those completed
+  values excluded. Source observations are retained separately.
+- Appearances above league fixtures warn about competition coverage. Player
+  statistics are never automatically summed into league team metrics, even if
+  the user chooses League only.
+- Complete league tables must balance GF/GA. An invalid league layer is reported
+  while squad comparisons remain available.
+
+## What is not established by these files
+
+One player season and league tables do not establish causal metric importance,
+attribute effects, a next-season squad goal forecast or exact signing goal gains.
+The advanced research dashboard retains the previous optional team/history models.
+Those models need their own compatible inputs and validation. A statistics-only
+FMST export cannot train attribute models.
+
+Synthetic fixtures test both export schemas, matching, missing data, finance
+arithmetic and the full guided Streamlit flow. User save files are not published.

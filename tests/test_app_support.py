@@ -52,8 +52,8 @@ class AppSupportTests(unittest.TestCase):
             owned_club="Club A",
             range_policy="midpoint",
         )
-        self.assertEqual(frame.loc[0, "market_value"], 2_000_000)
-        self.assertEqual(frame.loc[1, "market_value"], 3_000_000)
+        self.assertEqual(frame.loc[0, "fmst_guide_value"], 2_000_000)
+        self.assertEqual(frame.loc[1, "fmst_guide_value"], 3_000_000)
         self.assertTrue(frame.loc[0, "owned"])
         self.assertFalse(frame.loc[1, "owned"])
         self.assertEqual(frame.loc[0, "role_group"], "ST")

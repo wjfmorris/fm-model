@@ -41,11 +41,11 @@ The last historical season is kept out of attribute-model training for validatio
 
 Export the whole relevant player pool, not only obvious targets. Include a minimum-minute field so the model can distinguish a genuine season sample from a three-appearance spike. Keep the player's league, club, role/position, current season minutes, age, contract situation, market/asking value and wage.
 
-The optional FM26 Player Export community tool is reported to create CSV and HTML from the squad and player-search screens. Its CSV may be semicolon-delimited, so import it with delimiter detection and check that `Best Pos` has not split across columns. A separate FMST26 community tool is reported to expose statistics, attributes, CA/PA, contracts and club data with CSV export. These tools are external to this repository; verify that their current version and platform support match the user's installation before using them.
+The optional FM26 Player Export community tool is reported to create CSV and HTML from the squad and player-search screens. Its CSV may be semicolon-delimited, so import it with delimiter detection and check that `Best Pos` has not split across columns. FMST26 displays statistics, attributes and contracts, but display availability does not imply CSV exportability. The guided workflow uses exported statistics and manually entered finances; it does not assume attributes or wages can be exported. These tools are external to this repository; verify that their current version and platform support match the user's installation before using them.
 
 The FMST26 statistics export may look like `Name, Position, Club, Guide Value,
 Minutes Played, Goals, Assists, xA, Non-Penalty xG, ...`. The importer maps those
-headers to the canonical player schema, including `Guide Value -> market_value`,
+headers to the canonical player schema, including `Guide Value -> fmst_guide_value` (reference only, excluded from valuation),
 `Tackles Completed -> tackles_won`, `Saves per 90 -> saves_p90` and
 `xG Prevented -> xg_prevented`. Because the export does not necessarily contain a
 league or season column, call `read_player_export(..., league=..., season=...)` or

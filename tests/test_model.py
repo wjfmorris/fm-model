@@ -74,7 +74,7 @@ class ModelTests(unittest.TestCase):
         self.assertFalse(frame.loc[0, "owned"])
 
         scored = PlayerValuationModel().fit(frame).score(frame)
-        self.assertEqual(scored.loc[0, "market_price"], 1_500_000)
+        self.assertTrue(np.isnan(scored.loc[0, "market_price"]))  # Guide Value is not a verified price.
         self.assertEqual(scored.loc[1, "data_quality"], "no_minutes")
         self.assertEqual(scored.loc[1, "team_impact_evidence"], "no_minutes_for_impact")
         decisions = PlayerValuationModel().fit(frame).decisions(frame)
