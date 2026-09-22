@@ -7,7 +7,7 @@ import pandas as pd
 from fm_model.app_support import build_model, load_example_frames
 from fm_model.collection import collection_plan
 from fm_model.data import ATTRIBUTES
-from fm_model.roles import canonical_role
+from fm_model.roles import canonical_role, exact_positions, intended_position_role
 
 
 class SquadPlanningTests(unittest.TestCase):
@@ -37,6 +37,15 @@ class SquadPlanningTests(unittest.TestCase):
         self.assertEqual(canonical_role("AM (R)"), "AM_W")
         self.assertEqual(canonical_role("ST (C)"), "ST")
         self.assertEqual(canonical_role("GK"), "GK")
+
+    def test_exact_fm_positions_are_preserved_for_user_assignment(self):
+        self.assertEqual(exact_positions("M (L), AM (RL), ST"), ["ML", "AMR", "AML", "ST"])
+        self.assertEqual(exact_positions("D/WB (L)"), ["DL", "WBL"])
+        self.assertEqual(exact_positions("D (RL), WB (R)"), ["DR", "DL", "WBR"])
+        self.assertEqual(exact_positions("DM, M (C)"), ["DM", "MC"])
+        self.assertEqual(intended_position_role("AMR"), "AM_W")
+        self.assertEqual(intended_position_role("ST"), "ST")
+        self.assertEqual(intended_position_role("DL"), "FB_WB")
 
     def test_attribute_outcome_model_uses_chronological_validation(self):
         outcomes = self.model.player_outcome_model
