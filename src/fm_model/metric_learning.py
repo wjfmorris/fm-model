@@ -1,8 +1,8 @@
 """Learn recruitment metrics from the uploaded FMST player pool.
 
 No position is assigned pre-selected statistics. Every usable independent
-numeric performance metric is evaluated against team scoring and conceding,
-then validated out of sample across clubs.
+numeric performance metric is evaluated only against football-relevant team
+outcomes for that position, then validated out of sample across clubs.
 """
 from __future__ import annotations
 
@@ -41,6 +41,25 @@ RATE_REPLACEMENTS = {
     "tackles_attempted": "tackles_attempted_p90",
     "fouls_made": "fouls_made_p90",
 }
+
+
+# Do not spend statistical power testing implausible role/outcome combinations.
+# Hybrid positions remain two-way because their normal job can materially affect
+# both attacking and defensive phases.
+ROLE_OUTCOME_TARGETS = {
+    "GK": ("preventing goals",),
+    "CB": ("preventing goals",),
+    "FB_WB": ("scoring", "preventing goals"),
+    "CM_DM": ("scoring", "preventing goals"),
+    "AM_W": ("scoring",),
+    "ST": ("scoring",),
+}
+
+
+def role_outcomes(role: str) -> tuple[str, ...]:
+    """Return the team outcomes the metric learner is allowed to test."""
+
+    return ROLE_OUTCOME_TARGETS.get(str(role), ())
 
 def _normal(value) -> str:
     return unicodedata.normalize("NFKC", str(value)).strip().casefold()
@@ -244,7 +263,7 @@ def _loocv_univariate(x: np.ndarray, y: np.ndarray) -> dict:
     }
 
 def learn_metric_importance(pool: pd.DataFrame, league_table: pd.DataFrame | None = None, *, scope=None, minimum_role_minutes=450, min_clubs=8) -> pd.DataFrame:
-    """Test every eligible metric against both team GF and GA for every role."""
+    """Test every eligible metric only against role-relevant team outcomes."""
     require(pool, ["team_id", "role_group", "minutes"])
     f = add_rate_derivatives(pool)
     metrics = available_metrics(f)
@@ -257,10 +276,22 @@ def learn_metric_importance(pool: pd.DataFrame, league_table: pd.DataFrame | Non
             if len(joined) < min_clubs:
                 continue
             x = joined["metric_value"].to_numpy(float)
-            attack = _loocv_univariate(x, joined["goals_for_rate"].to_numpy(float))
-            defence = _loocv_univariate(x, -joined["goals_against_rate"].to_numpy(float))
+            allowed = role_outcomes(role)
+            choices = []
+            if "scoring" in allowed:
+                choices.append((
+                    "scoring",
+                    _loocv_univariate(x, joined["goals_for_rate"].to_numpy(float)),
+                ))
+            if "preventing goals" in allowed:
+                choices.append((
+                    "preventing goals",
+                    _loocv_univariate(x, -joined["goals_against_rate"].to_numpy(float)),
+                ))
+            if not choices:
+                continue
             outcome, evidence = max(
-                [("scoring", attack), ("preventing goals", defence)],
+                choices,
                 key=lambda item: -np.inf if not np.isfinite(item[1].get("validation_gain", np.nan)) else item[1]["validation_gain"],
             )
             gain, corr, slope = evidence.get("validation_gain", np.nan), evidence.get("spearman", np.nan), evidence.get("slope", np.nan)
@@ -269,6 +300,7 @@ def learn_metric_importance(pool: pd.DataFrame, league_table: pd.DataFrame | Non
             coverage = min(1.0, len(joined) / max(float(len(outcomes)), 1.0))
             rows.append({
                 "role_group": role, "position": ROLE_LABELS[role], "metric": metric,
+                "tested_outcomes": " / ".join(role_outcomes(role)),
                 "learned_outcome": outcome, "direction": "higher" if slope >= 0 else "lower",
                 "validation_gain": float(gain), "spearman": float(corr),
                 "importance_score": max(float(gain), 0.0) * abs(float(corr)) * coverage,
@@ -276,7 +308,7 @@ def learn_metric_importance(pool: pd.DataFrame, league_table: pd.DataFrame | Non
                 "outcome_source": str(joined["outcome_source"].iloc[0]),
                 "evidence": "Leave-one-club-out predictive association; not causal proof",
             })
-    columns = ["role_group","position","metric","learned_outcome","direction","validation_gain","spearman","importance_score","clubs","coverage","outcome_source","evidence"]
+    columns = ["role_group","position","metric","tested_outcomes","learned_outcome","direction","validation_gain","spearman","importance_score","clubs","coverage","outcome_source","evidence"]
     result = pd.DataFrame(rows, columns=columns)
     if result.empty:
         raise DataError("No metric had enough club-level variation and coverage to learn recruitment importance.")
