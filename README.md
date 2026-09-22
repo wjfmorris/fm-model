@@ -8,13 +8,13 @@ The default app follows the three-file recruitment workflow:
 
 1. Upload **league table history**, **league player statistics** and **my squad**.
 2. Calculate a target finish's GF/GA combinations, then confirm formation, player roles and starters.
-3. Review squad shortfalls and league-derived screening thresholds.
-4. Upload **potential signings** later and compare them against the same fixed benchmarks.
+3. Let the app test every eligible imported performance metric against team scoring and conceding, validate those relationships across clubs, and select the strongest non-redundant metrics for each position.
+4. Review squad shortfalls against thresholds calculated from the learned metrics, then upload **potential signings** and compare them against the same fixed reference benchmarks.
 5. Manually enter wages, achievable fees and contract assumptions for your squad and shortlisted targets. Compare football profiles alongside total costs and replacement-versus-keeping scenarios.
 
 No team-metrics file, wages for the entire league or duplicate `player_history.csv` is required. All player files normally cover one recent season; league tables cover several. **Guide Value is reference-only and excluded from financial valuation.** Financial edits persist in the session; download and restore their CSV between visits. See the [full upload and calculation contract](docs/fmst26-uploads.md).
 
-Recruitment focus menus are editable scouting choices. Their thresholds come from eligible positional peers; they are **descriptive benchmarks, not learned goal-impact weights**. The app does not turn one-season player comparisons into exact next-season GF/GA or transfer goal gains. Missing costs remain unknown. Candidate uploads cannot change the reference benchmark.
+The default recruitment focus is **learned from the uploaded save, not hard-coded by position**. Every eligible independent numeric performance field is tested against both team scoring and team conceding. Metric evidence uses leave-one-club-out validation; metrics that do not improve on a league-average baseline are not selected, and highly redundant metrics are pruned. The resulting screening thresholds still come from positional peer distributions. These are predictive associations, not causal proof or guaranteed transfer goal gains. Manual metric selection exists only as an explicit override. Missing costs remain unknown, and candidate uploads cannot move the reference benchmark.
 
 The **Advanced research dashboard** checkbox retains team goal-driver models and complete squad planning for datasets that support them. These features require team outcomes/process data; validated attribute models also require attributes and multiple player seasons. They remain unavailable when that evidence is absent.
 
@@ -37,6 +37,7 @@ fm-model/
 │       ├── drivers.py
 │       ├── league.py
 │       ├── learning.py
+│       ├── metric_learning.py
 │       ├── outcomes.py
 │       ├── pipeline.py
 │       ├── planning.py
